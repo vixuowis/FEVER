@@ -1,0 +1,40 @@
+# Environments
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+**/.env
+**/.env.*
+!**/.env.example
+
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Frontend build
+frontend/dist/
+frontend/build/
+
+# Backend (Python)
+backend/venv/
+backend/__pycache__/
+backend/.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+
+# OS files
+.DS_Store
+*.swp
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+.trae/
+
+# Archive/Prototypes (Optional exclusion if you don't want them in VC)
+archive/
+frontend/vibe-trading-reference/
