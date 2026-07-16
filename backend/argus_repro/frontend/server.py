@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import inspect
 import json
+import re
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -13,12 +14,15 @@ from aiohttp import web
 
 from ..agents import prompts as prompt_module
 from ..core import schemas as schema_module
+from ..core.utils import utc_now_iso, write_json
+from ..providers.free_market_provider import FreeMarketProvider, canonical_market_name
 from ..runners.common import build_runner, close_clients
 
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 OUTPUTS_DIR = ROOT / "outputs"
+EVENT_ANALYSIS_DIR = ROOT / "data" / "event_analyses"
 
 
 @dataclass
@@ -32,6 +36,7 @@ class JobState:
 
 
 _jobs: dict[str, JobState] = {}
+_free_market_provider = FreeMarketProvider()
 
 
 def _json_response(data: Any) -> web.Response:
@@ -63,6 +68,17 @@ def _run_dir(run_id: str) -> Path:
     if not str(path).startswith(str(OUTPUTS_DIR.resolve())) or not path.exists():
         raise web.HTTPNotFound(text="run not found")
     return path
+
+
+def _safe_event_id(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        raise web.HTTPBadRequest(text="event_id is required")
+    return re.sub(r"[^A-Za-z0-9._-]", "_", text)
+
+
+def _event_analysis_path(event_id: str) -> Path:
+    return EVENT_ANALYSIS_DIR / f"{_safe_event_id(event_id)}.json"
 
 
 def _latest_graph(run_dir: Path) -> Any | None:
@@ -225,6 +241,65 @@ async def start_job(request: web.Request) -> web.Response:
     _jobs[job_id] = JobState(job_id=job_id, status="queued", question=question)
     asyncio.create_task(_run_job(job_id, request_data))
     return _json_response({"job": asdict(_jobs[job_id])})
+
+
+async def get_free_market_event(request: web.Request) -> web.Response:
+    market = canonical_market_name(request.query.get("market"))
+    try:
+        event = await _free_market_provider.get_event(market)
+    except Exception as exc:  # noqa: BLE001
+        raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+    return _json_response({"event": event})
+
+
+async def get_free_market_events(request: web.Request) -> web.Response:
+    market = canonical_market_name(request.query.get("market"))
+    limit = _bounded_int(request.query.get("limit"), "limit", 1, 20) or 6
+    try:
+        events = await _free_market_provider.get_events(market, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        raise web.HTTPServiceUnavailable(text=str(exc)) from exc
+    return _json_response({"market": market, "events": [event.to_dict() for event in events]})
+
+
+async def get_event_analysis(request: web.Request) -> web.Response:
+    event_id = request.match_info["event_id"]
+    path = _event_analysis_path(event_id)
+    data = _read_json(path)
+    if data is None:
+        raise web.HTTPNotFound(text="event analysis not found")
+
+    fingerprint = request.query.get("fingerprint")
+    if fingerprint and data.get("fingerprint") != fingerprint:
+        raise web.HTTPNotFound(text="event analysis fingerprint mismatch")
+
+    return _json_response(data)
+
+
+async def save_event_analysis(request: web.Request) -> web.Response:
+    event_id = request.match_info["event_id"]
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError as exc:
+        raise web.HTTPBadRequest(text="invalid json payload") from exc
+
+    analysis = payload.get("analysis")
+    if not isinstance(analysis, dict):
+        raise web.HTTPBadRequest(text="analysis must be an object")
+
+    event_payload = payload.get("event")
+    if event_payload is not None and not isinstance(event_payload, dict):
+        raise web.HTTPBadRequest(text="event must be an object")
+
+    document = {
+        "event_id": event_id,
+        "fingerprint": str(payload.get("fingerprint") or ""),
+        "processed_at": str(payload.get("processed_at") or utc_now_iso()),
+        "event": event_payload or {},
+        "analysis": analysis,
+    }
+    write_json(_event_analysis_path(event_id), document)
+    return _json_response({"ok": True, "event_id": event_id, "processed_at": document["processed_at"]})
 
 
 def _bounded_int(value: Any, field: str, low: int, high: int) -> int | None:
@@ -476,6 +551,10 @@ def create_app() -> web.Application:
     cors.add(app.router.add_get("/api/spec", get_spec))
     cors.add(app.router.add_post("/api/jobs", start_job))
     cors.add(app.router.add_get("/api/jobs/{job_id}", get_job))
+    cors.add(app.router.add_get("/api/live/free-event", get_free_market_event))
+    cors.add(app.router.add_get("/api/live/free-events", get_free_market_events))
+    cors.add(app.router.add_get("/api/live/event-analyses/{event_id}", get_event_analysis))
+    cors.add(app.router.add_put("/api/live/event-analyses/{event_id}", save_event_analysis))
     app.router.add_static("/static", STATIC_DIR)
     return app
 

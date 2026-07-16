@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { generateMarketEvent } from '../services/llm';
+import { buildStableEventId, normalizeEventTimestamp } from '../lib/eventIdentity';
+import { fetchFreeMarketEvents, generateMarketEvent } from '../services/llm';
 
 export interface Event {
   id: string;
@@ -10,12 +11,13 @@ export interface Event {
   description: string;
   market: 'Global' | 'US' | 'EU' | 'Asia';
   sourceUrl?: string;
+  provider?: string;
 }
 
 export interface GraphNode {
   id: string;
   label: string;
-  category: 'event' | 'asset' | 'macro' | 'indicator';
+  category: 'event' | 'asset' | 'macro' | 'indicator' | 'company';
   fever: number;
   position?: { x: number; y: number };
   status: 'historical' | 'predicted';
@@ -39,13 +41,14 @@ export interface GraphSession {
   title: string;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  sourceEventId?: string;
 }
 
 export interface SystemLog {
   id: string;
   timestamp: string;
   type: 'request' | 'response' | 'error';
-  source: 'LLM' | 'QVeris' | 'Argus';
+  source: 'LLM' | 'QVeris' | 'Argus' | 'AKShare';
   data: any;
 }
 
@@ -75,8 +78,13 @@ interface FeverStore {
   addLog: (log: Omit<SystemLog, 'id' | 'timestamp'>) => void;
   clearLogs: () => void;
   initializeSystem: () => Promise<void>;
+  reloadFreeEvents: () => Promise<void>;
   isInitializing: boolean;
+  freeSourceStatus: 'idle' | 'ready' | 'empty';
+  freeSourceMessage: string | null;
 }
+
+let initializationPromise: Promise<void> | null = null;
 
 const MOCK_EVENTS: Event[] = [];
 
@@ -104,8 +112,48 @@ const DEFAULT_SESSION: GraphSession = {
   id: 's-default',
   title: 'Global Macro Baseline',
   nodes: MOCK_NODES,
-  edges: MOCK_EDGES
+  edges: MOCK_EDGES,
 };
+
+function extractErrorMessage(reason: unknown): string {
+  if (reason instanceof Error) return reason.message;
+  return typeof reason === 'string' ? reason : '免费事件源暂时不可用';
+}
+
+function buildFreeSourceMessage(events: Event[], errors: string[]): string | null {
+  const snapshotMarkets = Array.from(
+    new Set(
+      events
+        .filter((event) => event.provider === 'free_snapshot')
+        .map((event) => event.market),
+    ),
+  );
+
+  if (snapshotMarkets.length > 0) {
+    return `部分实时免费源波动，当前已切换到免费快照：${snapshotMarkets.join(' / ')}。`;
+  }
+
+  if (events.length === 0) {
+    return '当前实时免费源暂不可用，请稍后重试。';
+  }
+
+  if (errors.length > 0) {
+    return '部分市场拉取波动，但当前已有可用的免费事件。';
+  }
+
+  return null;
+}
+
+function dedupeEvents(events: Event[]): Event[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    if (seen.has(event.id)) {
+      return false;
+    }
+    seen.add(event.id);
+    return true;
+  });
+}
 
 export const useFeverStore = create<FeverStore>((set, get) => ({
   events: MOCK_EVENTS,
@@ -114,12 +162,16 @@ export const useFeverStore = create<FeverStore>((set, get) => ({
   activeSessionId: 's-default',
   globalFever: 65,
   selectedNodeId: null,
-  activeMarket: 'Global',
+  activeMarket: 'Asia',
   isLive: true,
   language: 'zh',
-  targetAssets: ['AAPL', 'BTC', 'TSLA'],
+  targetAssets: [],
   isInitializing: true,
-  addEvent: (event) => set((state) => ({ events: [event, ...state.events].slice(0, 50) })),
+  freeSourceStatus: 'idle',
+  freeSourceMessage: null,
+  addEvent: (event) => set((state) => {
+    return { events: [event, ...state.events].slice(0, 50) };
+  }),
   updateGlobalFever: (level) => set({ globalFever: level }),
   updateNodeFever: (id, fever) => set((state) => ({
     sessions: state.sessions.map(s => s.id === state.activeSessionId ? {
@@ -143,6 +195,7 @@ export const useFeverStore = create<FeverStore>((set, get) => ({
     const newSession: GraphSession = {
       id: `s-${event.id}`,
       title: event.title,
+      sourceEventId: event.id,
       nodes: [{
         id: `root-${event.id}`,
         label: event.title,
@@ -174,65 +227,114 @@ export const useFeverStore = create<FeverStore>((set, get) => ({
     logs: [...state.logs, { ...log, id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, timestamp: new Date().toISOString() }].slice(-100) // Keep last 100 logs
   })),
   clearLogs: () => set({ logs: [] }),
+  reloadFreeEvents: async () => {
+    set({ isInitializing: true, freeSourceMessage: null });
+    return get().initializeSystem();
+  },
   
   initializeSystem: async () => {
-    try {
+    if (initializationPromise) {
+      return initializationPromise;
+    }
+
+    initializationPromise = (async () => {
+      try {
       const { language } = get();
-      const markets = ['US', 'Global', 'Asia'];
+      const markets: Array<'US' | 'Global' | 'EU' | 'Asia'> = ['Asia', 'US', 'EU', 'Global'];
       const initEvents: Event[] = [];
       const initNodes: GraphNode[] = [];
+      const errors: string[] = [];
       
-      // 并行请求获取初始事件
-      const promises = markets.map(m => generateMarketEvent(m, 60));
+      // 并行请求获取初始事件列表
+      const promises = markets.map((m) => fetchFreeMarketEvents(m, 6));
       const results = await Promise.allSettled(promises);
       
       results.forEach((res, idx) => {
-        if (res.status === 'fulfilled' && res.value) {
-          const mkt = markets[idx] as 'US' | 'Global' | 'Asia';
-          const evt: Event = {
-            id: `evt-init-${idx}`,
-            title: res.value.title || 'Market Update',
-            description: res.value.desc || 'System initialized.',
-            feverLevel: res.value.baseFever || 60,
-            impactAssets: res.value.assets || [],
-            market: mkt,
-            timestamp: new Date(Date.now() - idx * 3600000).toISOString(),
-            sourceUrl: res.value.sourceUrl
-          };
-          initEvents.push(evt);
-          
-          initNodes.push({
-            id: `n-init-${idx}`,
-            label: evt.title,
-            category: 'macro',
-            fever: evt.feverLevel,
-            position: { x: 100, y: 150 + idx * 300 },
-            status: 'historical',
-            timestamp: evt.timestamp,
-            market: mkt,
-            sourceUrl: evt.sourceUrl
+        if (res.status === 'fulfilled' && res.value.length > 0) {
+          const mkt = markets[idx];
+          const marketEvents = res.value.map((item, itemIdx) => {
+            const timestamp = normalizeEventTimestamp(item.timestamp);
+            return {
+              id: buildStableEventId({
+                title: item.title,
+                desc: item.desc,
+                assets: item.assets,
+                sourceUrl: item.sourceUrl,
+                market: mkt,
+                timestamp,
+              }),
+              title: item.title || 'Market Update',
+              description: item.desc || 'Free market event.',
+              feverLevel: Number((item.baseFever || 60).toFixed(1)),
+              impactAssets: item.assets || [],
+              market: mkt,
+              timestamp,
+              sourceUrl: item.sourceUrl,
+              provider: item.provider,
+              _order: itemIdx,
+            };
           });
+
+          marketEvents.forEach((evt, itemIdx) => {
+            initEvents.push(evt);
+            if (itemIdx === 0) {
+              initNodes.push({
+                id: `n-init-${idx}`,
+                label: evt.title,
+                category: 'macro',
+                fever: evt.feverLevel,
+                position: { x: 100, y: 150 + idx * 220 },
+                status: 'historical',
+                timestamp: evt.timestamp,
+                market: mkt,
+                sourceUrl: evt.sourceUrl
+              });
+            }
+          });
+        }
+        if (res.status === 'rejected') {
+          errors.push(`${markets[idx]}: ${extractErrorMessage(res.reason)}`);
         }
       });
       
       if (initEvents.length > 0) {
+        const normalizedEvents = dedupeEvents(initEvents)
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 32);
         set({ 
-          events: initEvents,
+          events: normalizedEvents,
           sessions: [{
             id: 's-default',
             title: 'Global Baseline',
             nodes: initNodes,
             edges: []
           }],
-          globalFever: initEvents[0].feverLevel,
-          isInitializing: false 
+          globalFever: normalizedEvents[0]?.feverLevel ?? 60,
+          isInitializing: false,
+          freeSourceStatus: 'ready',
+          freeSourceMessage: buildFreeSourceMessage(normalizedEvents, errors),
         });
       } else {
-        set({ isInitializing: false }); // Fallback if all APIs fail
+        set({
+          events: [],
+          isInitializing: false,
+          freeSourceStatus: 'empty',
+          freeSourceMessage: buildFreeSourceMessage(initEvents, errors),
+        });
       }
-    } catch (e) {
-      console.error("Initialization failed", e);
-      set({ isInitializing: false });
-    }
+      } catch (e) {
+        console.error("Initialization failed", e);
+        set({
+          events: [],
+          isInitializing: false,
+          freeSourceStatus: 'empty',
+          freeSourceMessage: '当前实时免费源暂不可用，请稍后重试。',
+        });
+      } finally {
+        initializationPromise = null;
+      }
+    })();
+
+    return initializationPromise;
   }
 }));

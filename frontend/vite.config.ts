@@ -21,6 +21,10 @@ export default defineConfig(({ mode }) => {
           target: env.QVERIS_BASE_URL ? env.QVERIS_BASE_URL.replace(/"/g, '') : 'https://qveris.ai/api/v1',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/qveris/, ''),
+        },
+        '/api/live': {
+          target: env.FEVER_BACKEND_URL || 'http://127.0.0.1:7860',
+          changeOrigin: true,
         }
       }
     },
@@ -30,6 +34,7 @@ export default defineConfig(({ mode }) => {
       'process.env.LLM_API_KEY': JSON.stringify(env.LLM_API_KEY || ''),
       'process.env.LLM_API_URL': JSON.stringify(env.LLM_API_URL || ''),
       'process.env.LLM_MODEL': JSON.stringify(env.LLM_MODEL || ''),
+      'process.env.FEVER_BACKEND_URL': JSON.stringify(env.FEVER_BACKEND_URL || ''),
     },
     plugins: [
       react({

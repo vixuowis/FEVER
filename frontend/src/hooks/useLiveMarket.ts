@@ -1,15 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useFeverStore, Event } from '../store';
+import { buildStableEventId, normalizeEventTimestamp } from '../lib/eventIdentity';
 import { generateMarketEvent } from '../services/llm';
-
-const TEMPLATES = [
-  { title: 'Unexpected Inflation Print in {market}', desc: 'Core CPI exceeds expectations, raising fears of extended tight monetary policy.', assets: ['Bonds', 'Equities', 'USD'], baseFever: 75 },
-  { title: 'Central Bank in {market} Signals Dovish Pivot', desc: 'Policymakers hint at potential rate cuts in the upcoming quarter.', assets: ['Currency', 'Equities', 'Gold'], baseFever: 65 },
-  { title: 'Major Supply Chain Disruption in {market}', desc: 'Logistics gridlock at major ports causes immediate shortages.', assets: ['Commodities', 'Industrials'], baseFever: 82 },
-  { title: 'Flash Crash in {market} Tech Sector', desc: 'Algorithmic selling triggers rapid and unexplained drops across tech blue-chips.', assets: ['Tech', 'Derivatives'], baseFever: 90 },
-];
-
-const MARKETS = ['US', 'EU', 'Asia', 'Global'] as const;
 
 export function useLiveMarket() {
   const { addEvent, globalFever, updateGlobalFever, isLive, activeMarket } = useFeverStore();
@@ -23,32 +15,33 @@ export function useLiveMarket() {
       isGenerating.current = true;
       try {
         const mkt = activeMarket;
-        
+
         let eventData;
         try {
-          // Attempt real API generation
           eventData = await generateMarketEvent(mkt, globalFever);
         } catch (apiErr) {
-          console.warn("LLM Event Generation Failed, falling back to templates.", apiErr);
-          const template = TEMPLATES[Math.floor(Math.random() * TEMPLATES.length)];
-          const noise = Math.random() * 20 - 10;
-          eventData = {
-            title: template.title.replace('{market}', mkt),
-            desc: template.desc,
-            assets: template.assets,
-            baseFever: Math.min(100, Math.max(0, template.baseFever + noise))
-          };
+          console.warn("Free market event fetch failed, skipping live event update.", apiErr);
+          return;
         }
         
+        const timestamp = normalizeEventTimestamp(eventData.timestamp);
         const newEvent: Event = {
-          id: `evt-live-${Date.now()}`,
+          id: buildStableEventId({
+            title: eventData.title,
+            desc: eventData.desc,
+            assets: eventData.assets,
+            sourceUrl: eventData.sourceUrl,
+            market: mkt,
+            timestamp,
+          }, 'evt-live'),
           title: eventData.title,
           feverLevel: Number(eventData.baseFever.toFixed(1)),
-          timestamp: new Date().toISOString(),
+          timestamp,
           impactAssets: eventData.assets,
           description: eventData.desc,
           market: mkt,
-          sourceUrl: eventData.sourceUrl || 'https://www.reuters.com/markets'
+          sourceUrl: eventData.sourceUrl,
+          provider: eventData.provider,
         };
         
         addEvent(newEvent);
@@ -63,7 +56,8 @@ export function useLiveMarket() {
 
     const interval = setInterval(() => {
       // 30% chance to generate an event every 10 seconds (reduces API load)
-      if (Math.random() > 0.7) {
+      const decision = Math.random();
+      if (decision > 0.7) {
         generateAsync();
       } else {
         // Natural mean reversion

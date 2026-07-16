@@ -34,6 +34,12 @@ Thumbs.db
 .vscode/
 .idea/
 .trae/
+.dbg/
+
+# Runtime data
+backend/data/event_analyses/*.json
+backend/data/free_market_snapshots/*.json
+debug-homepage-stuck-events.md
 
 # Archive/Prototypes (Optional exclusion if you don't want them in VC)
 archive/

@@ -5,8 +5,69 @@ const QVERIS_BASE_URL = process.env.QVERIS_BASE_URL?.replace(/"/g, '') || "https
 const LLM_API_KEY = process.env.LLM_API_KEY;
 const LLM_MODEL = process.env.LLM_MODEL?.replace(/"/g, '') || "deepseek-v4-flash";
 
-export async function askLLM(systemPrompt: string, userPrompt: string) {
+async function fetchFreeMarketEvent(market: string) {
+  const endpoint = `/api/live/free-event?market=${encodeURIComponent(market)}`;
+  useFeverStore.getState().addLog({
+    type: 'request',
+    source: 'AKShare',
+    data: { endpoint, market }
+  });
+
+  const res = await fetch(endpoint);
+  if (!res.ok) {
+    const errText = await res.text();
+    useFeverStore.getState().addLog({
+      type: 'error',
+      source: 'AKShare',
+      data: { status: res.status, error: errText }
+    });
+    throw new Error(`HTTP ${res.status}: ${errText}`);
+  }
+
+  const data = await res.json();
+  useFeverStore.getState().addLog({
+    type: 'response',
+    source: 'AKShare',
+    data
+  });
+  return data.event;
+}
+
+export async function fetchFreeMarketEvents(market: string, limit = 6) {
+  const endpoint = `/api/live/free-events?market=${encodeURIComponent(market)}&limit=${encodeURIComponent(limit)}`;
+  useFeverStore.getState().addLog({
+    type: 'request',
+    source: 'AKShare',
+    data: { endpoint, market, limit }
+  });
+
+  const res = await fetch(endpoint);
+  if (!res.ok) {
+    const errText = await res.text();
+    useFeverStore.getState().addLog({
+      type: 'error',
+      source: 'AKShare',
+      data: { status: res.status, error: errText }
+    });
+    throw new Error(`HTTP ${res.status}: ${errText}`);
+  }
+
+  const data = await res.json();
+  useFeverStore.getState().addLog({
+    type: 'response',
+    source: 'AKShare',
+    data
+  });
+  return Array.isArray(data.events) ? data.events : [];
+}
+
+export async function askLLM(
+  systemPrompt: string,
+  userPrompt: string,
+  options: { allowQVerisFallback?: boolean } = {},
+) {
   let model = LLM_MODEL.split(' ')[0]; // remove comments like "# deepseek-v4"
+  const allowQVerisFallback = options.allowQVerisFallback ?? true;
 
   const tryFetch = async (endpoint: string, key: string, source: 'LLM' | 'QVeris') => {
     const payload = {
@@ -50,6 +111,9 @@ export async function askLLM(systemPrompt: string, userPrompt: string) {
     if (!LLM_API_KEY) throw new Error("No LLM Key");
     res = await tryFetch('/api/llm/chat/completions', LLM_API_KEY, 'LLM');
   } catch (err1) {
+    if (!allowQVerisFallback) {
+      throw err1;
+    }
     console.warn("Primary LLM API failed, trying QVeris...", err1);
     try {
       usedSource = 'QVeris';
@@ -93,28 +157,12 @@ export async function askLLM(systemPrompt: string, userPrompt: string) {
   }
 }
 
-export async function generateMarketEvent(market: string, currentGlobalFever: number, language: string = 'zh') {
+export async function generateMarketEvent(market: string, _currentGlobalFever: number, _language: string = 'zh') {
   try {
-    const sys = `You are a financial simulator. Generate a random breaking market event for the ${market} region. Current global fever is ${currentGlobalFever}/100. The event should be highly realistic, sudden, and impactful. Return ONLY valid JSON format without any additional text. IMPORTANT: All output text values MUST be in Chinese.`;
-    const prompt = `Return JSON with these exact keys:
-    {
-      "title": "Short catchy news headline (Chinese)",
-      "desc": "1 sentence explanation of the event and its immediate impact (Chinese)",
-      "assets": ["Asset1", "Asset2"],
-      "baseFever": <number between 10 and 100 based on severity>,
-      "sourceUrl": "A realistic-looking mock URL for the news source (e.g. https://www.bloomberg.com/...)"
-    }`;
-    
-    return await askLLM(sys, prompt);
-  } catch (err) {
-    console.warn("LLM generation failed, using fallback data for generateMarketEvent:", err);
-    return {
-      title: `${market}市场突发重大政策调整`,
-      desc: `受近期宏观经济数据影响，监管机构宣布对${market}市场的关键行业实施新的合规要求，预计将引发短期资金重分配。`,
-      assets: ["核心权重股", "相关避险资产"],
-      baseFever: Math.min(100, currentGlobalFever + Math.floor(Math.random() * 20)),
-      sourceUrl: "https://www.reuters.com/markets/asia/flash-news"
-    };
+    return await fetchFreeMarketEvent(market);
+  } catch (freeDataErr) {
+    console.warn("AKShare event fetch failed, skipping synthetic event generation:", freeDataErr);
+    throw freeDataErr;
   }
 }
 
