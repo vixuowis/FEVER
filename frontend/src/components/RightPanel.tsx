@@ -713,7 +713,7 @@ export default function RightPanel() {
   }
 
   return (
-    <aside className="flex h-full w-[400px] shrink-0 flex-col border-l border-edge bg-[#FBFAF8]">
+    <aside className="absolute right-0 top-0 z-30 flex h-full w-[400px] flex-col border-l border-edge bg-[#FBFAF8] shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.18)]">
       {/* tab 头 */}
       <div className="flex items-center gap-1 border-b border-edge px-2.5 py-2">
         {TABS.map((t) => (

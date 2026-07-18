@@ -13,8 +13,14 @@ export default function App() {
   return (
     <div className="flex h-screen w-full overflow-hidden bg-paper font-sans text-ink antialiased">
       <Sidebar />
-      <ChatPanel />
-      <RightPanel />
+      {/*
+        中间工作区 + 右栏：relative 容器让右栏展开时能 absolute 浮在 ChatPanel 之上，
+        不再挤压主排版（design.md §7：右栏为浮层）。
+      */}
+      <div className="relative flex min-w-0 flex-1 overflow-hidden">
+        <ChatPanel />
+        <RightPanel />
+      </div>
     </div>
   );
 }
