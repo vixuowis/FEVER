@@ -29,7 +29,6 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => req<{ ok: boolean; llm: string }>("/health"),
   skills: () => req<SkillMeta[]>("/skills"),
   agents: () => req<AgentMeta[]>("/agents"),
   cases: () => req<CaseItem[]>("/cases"),
@@ -38,30 +37,13 @@ export const api = {
   caseDetail: (id: string) => req<CaseDetail>(`/cases/${id}`),
   deleteCase: (id: string) => req<{ ok: boolean }>(`/cases/${id}`, { method: "DELETE" }),
   pinArtifact: (caseId: string, artifactId: string) =>
-    // 后端返回完整 artifact（含 pinned 字段）
-    req<{ pinned: number }>(`/cases/${caseId}/artifacts/${artifactId}/pin`, {
+    // 后端 toggle_pin 返回完整 artifact（含最新 pinned 字段）
+    req<Artifact>(`/cases/${caseId}/artifacts/${artifactId}/pin`, {
       method: "POST",
       body: "{}",
     }),
   genReport: (caseId: string) =>
     req<Artifact>(`/cases/${caseId}/report`, { method: "POST", body: "{}" }),
-  hotTopics: (refresh: boolean = false) =>
-    fetch(`${BASE}/hot_topics${refresh ? "?refresh=1" : ""}`).then(async (r) => {
-      if (!r.ok) throw new Error(`hot_topics ${r.status}`);
-      return (await r.json()) as {
-        items: {
-          category: "news" | "board" | "fund_flow";
-          title: string;
-          desc: string;
-          query: string;
-          mode: Mode;
-          icon_hint: "newspaper" | "sparkles" | "trending" | "landmark" | "candlestick";
-        }[];
-        ts: number;
-        fresh: boolean;
-        source: string;
-      };
-    }),
   logicAutoCheck: (item: {
     hypothesis: string;
     category?: string;

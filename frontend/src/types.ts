@@ -168,6 +168,8 @@ export interface SSEEvent {
   case_id?: string;
   mode?: Mode;
   agent?: string;
+  /** mode="team" 时透传的白名单（与请求体一致） */
+  team_members?: string[] | null;
   delta?: string;
   id?: string;
   skill?: string;
