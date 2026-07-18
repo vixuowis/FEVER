@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config, db
 from .routes import cases, chat, logic, meta
 
-app = FastAPI(title="FEVER", version="3.4.0", docs_url="/api/docs")
+app = FastAPI(title="FEVER", version="3.4.1", docs_url="/api/docs")
 
 app.add_middleware(
     CORSMiddleware,
