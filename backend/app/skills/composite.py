@@ -220,6 +220,114 @@ async def market_research(symbol: str, lookback_days: int = 60,
     )
 
 
+# ============================================================== post_market_outlook
+# 后市推演（事件预测员的核心入口）：
+# 并发拉 K线 + 资金流 + 近期新闻 + 板块异动，输出"预测上下文包"。
+# 真正的预测交给 predictor Agent 用 LLM 推理（避免在 composite 里硬编码规则）。
+# 第一个落地的预测维度：短期量价 / 催化驱动 / 风险情景。
+
+@skill(
+    "post_market_outlook",
+    "后市推演上下文包：并发拉取个股近期 K线 / 资金流向 / 个股新闻 / 行业板块异动，"
+    "输出聚合数据（不做预测本身 —— 预测由 predictor Agent 接管）。"
+    "symbol 6 位 A 股代码或美股 ticker（自动识别）；lookback_days 默认 30。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "股票代码（A股 6 位或美股 ticker）"},
+            "lookback_days": {"type": "integer", "description": "回溯天数，默认 30"},
+        },
+        "required": ["symbol"],
+        "additionalProperties": False,
+    },
+    category="composite",
+    composes=["get_stock_daily", "get_industry_fund_flow", "get_individual_fund_flow_rank",
+              "get_stock_news", "list_industry_boards"],
+)
+async def post_market_outlook(symbol: str, lookback_days: int = 30) -> dict:
+    raw = (symbol or "").strip()
+    if not raw:
+        return err("symbol 不能为空")
+    us = is_us_symbol(raw)
+    if us:
+        # 美股：ticker 直接传（composite 不解析 6 位 code，atomic 自行判断）
+        sym = raw.upper()
+    else:
+        sym = "".join(ch for ch in raw if ch.isdigit())[-6:]
+        if len(sym) != 6:
+            return err(f"symbol 不合法: {symbol}")
+    from datetime import datetime, timedelta
+    end = datetime.now().strftime("%Y%m%d")
+    start = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y%m%d")
+    tasks: list[tuple[str, dict]] = [
+        ("get_stock_daily", {"symbol": sym, "start_date": start, "end_date": end, "adjust": "qfq"}),
+        ("get_industry_fund_flow", {"sort_by": "净额", "limit": 20}),
+        ("get_individual_fund_flow_rank", {"limit": 10}),
+        ("list_industry_boards", {"symbol": sym}) if not us else ("get_global_news", {"limit": 8}),
+    ]
+    # 个股新闻仅 A 股可拉，美股已在上面用 global news 替代
+    if not us:
+        tasks.append(("get_stock_news", {"symbol": sym, "limit": 6}))
+    results = await _gather_sub(tasks)
+    summary = _summarize_subs(results)
+    summary["composed"] = [n for n, _ in tasks]
+    # 摘要：抽取 K线末尾 5 根的 OHLC + 涨跌幅 + 资金净额 + 板块名
+    kline_summary: list[dict] = []
+    flow_summary: dict = {}
+    news_titles: list[str] = []
+    sector_names: list[str] = []
+    for (name, _), r in zip(tasks, results):
+        if not isinstance(r, dict) or not r.get("ok"):
+            continue
+        d = r.get("data") or []
+        if name == "get_stock_daily" and isinstance(d, list) and d:
+            tail = d[-5:]
+            for i, row in enumerate(tail):
+                close = row.get("close")
+                prev_close = tail[i - 1].get("close") if i > 0 else None
+                pct = None
+                try:
+                    if close is not None and prev_close not in (None, 0):
+                        pct = round((float(close) - float(prev_close)) / float(prev_close) * 100, 2)
+                except (TypeError, ValueError):
+                    pct = None
+                kline_summary.append({
+                    "date": row.get("date"),
+                    "close": close,
+                    "pct_chg": pct,
+                    "volume": row.get("volume"),
+                })
+        elif name == "get_industry_fund_flow" and isinstance(d, list) and d:
+            flow_summary["industry_top"] = [
+                {"name": r.get("名称") or r.get("name"), "net": r.get("净额") or r.get("net")}
+                for r in d[:5]
+            ]
+        elif name == "get_individual_fund_flow_rank" and isinstance(d, list) and d:
+            flow_summary["individual_top"] = [
+                {"name": r.get("名称") or r.get("name"), "net": r.get("净额") or r.get("net")}
+                for r in d[:5]
+            ]
+        elif name == "get_stock_news" and isinstance(d, list) and d:
+            news_titles = [(n.get("title") or "")[:80] for n in d[:6]]
+        elif name == "list_industry_boards" and isinstance(d, list) and d:
+            sector_names = [(r.get("板块名称") or r.get("name") or "") for r in d[:3]]
+    return ok(
+        {
+            "symbol": sym, "market": "美股" if us else "A股",
+            "lookback_days": lookback_days,
+            "kline_recent": kline_summary,
+            "flow": flow_summary,
+            "news_titles": news_titles,
+            "sectors": sector_names,
+            "data_point_count": summary["ok_count"],
+            **summary,
+        },
+        meta("post_market_outlook", len(tasks)),
+        artifacts=_collect_artifacts(results) or None,
+    ) | ({"note": "美股 ticker 已用全球快讯替代个股新闻；预测维度在 predictor Agent 中完成"}
+         if us else {})
+
+
 # ========================================================== financial_research
 # 财务研究：并发拉摘要/指标/利润表/业绩预告
 
