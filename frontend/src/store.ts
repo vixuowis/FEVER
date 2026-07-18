@@ -277,6 +277,9 @@ interface FeverState {
   setMode: (m: Mode) => void;
   setSelectedAgent: (id: string) => void;
   setTeamMembers: (ids: string[]) => void;
+  /** 由 chip / hot topic 触发的 prompt 种子；Composer 监听变化后填到 textarea 并清空 */
+  promptSeed: string;
+  setPromptSeed: (s: string) => void;
 
   /** 库操作：新增/更新/忽略 */
   addLogicItems: (items: LogicItem[]) => void;
@@ -454,6 +457,7 @@ export const useStore = create<FeverState>((set, get) => {
     selectedAgent: loadUIPrefs().selectedAgent ?? "predictor",
     // 默认全选（首次进站无缓存时=空数组 → 在 setSkills 拉完 agents 后再补全）
     teamMembers: loadUIPrefs().teamMembers ?? [],
+    promptSeed: "",
     loadingCase: false,
     generatingReport: false,
     initialized: false,
@@ -729,6 +733,10 @@ export const useStore = create<FeverState>((set, get) => {
       const s = get();
       saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: s.mode,
                     selectedAgent: s.selectedAgent, teamMembers: ids });
+    },
+
+    setPromptSeed: (s) => {
+      set({ promptSeed: s });
     },
 
     /* ---------------- research logic library ---------------- */

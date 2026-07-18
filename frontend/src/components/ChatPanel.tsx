@@ -62,6 +62,19 @@ const ICON_BY_HINT: Record<string, React.ReactNode> = {
 
 const CHIPS = ["日K行情", "财经快讯", "公告检索", "财务摘要", "事件研究 CAR", "宏观指标", "龙虎榜", "融资融券", "研报评级"];
 
+/** chip 标签 → 点击后填到 composer 的 prompt 模板；`<标的>` 是占位符。 */
+const CHIP_PROMPTS: Record<string, string> = {
+  "日K行情": "用日K行情分析 <标的> 的近期走势",
+  "财经快讯": "看下最近的重要财经快讯",
+  "公告检索": "检索 <标的> 的最新公告",
+  "财务摘要": "查一下 <标的> 的财务摘要",
+  "事件研究 CAR": "对 <标的> 做一次事件研究 CAR 分析",
+  "宏观指标": "看下最新宏观指标（CPI / PMI / M2）",
+  "龙虎榜": "看下最新龙虎榜",
+  "融资融券": "查 <标的> 的融资融券数据",
+  "研报评级": "查 <标的> 的最新研报评级",
+};
+
 const HOT_CACHE_KEY = "fever.hot_topics.v1";
 const HOT_TTL_MS = 10 * 60 * 1000; // 10 分钟
 
@@ -105,6 +118,7 @@ function Hero() {
   const sendMessage = useStore((s) => s.sendMessage);
   const setMode = useStore((s) => s.setMode);
   const streaming = useStore((s) => s.streaming);
+  const setPromptSeed = useStore((s) => s.setPromptSeed);
 
   // 初始建议：优先 localStorage 缓存；空时用兜底
   const [suggestions, setSuggestions] = useState<Suggestion[]>(() => {
@@ -233,12 +247,15 @@ function Hero() {
         <div className="mt-6 flex flex-wrap items-center gap-1.5">
           <LineChart size={13} className="text-faint" />
           {CHIPS.map((c) => (
-            <span
+            <button
               key={c}
-              className="rounded-full border border-edge bg-card px-2.5 py-1 text-[11.5px] text-mute transition-colors hover:border-jade/40 hover:text-jade"
+              type="button"
+              title={CHIP_PROMPTS[c]}
+              onClick={() => setPromptSeed(CHIP_PROMPTS[c] ?? c)}
+              className="rounded-full border border-edge bg-card px-2.5 py-1 text-[11.5px] text-mute transition-all hover:border-jade/40 hover:bg-jade-soft hover:text-jade active:scale-95"
             >
               {c}
-            </span>
+            </button>
           ))}
         </div>
       </div>

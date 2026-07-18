@@ -26,6 +26,26 @@ export default function Composer() {
   const setSelectedAgent = useStore((s) => s.setSelectedAgent);
   const teamMembers = useStore((s) => s.teamMembers);
   const setTeamMembers = useStore((s) => s.setTeamMembers);
+  const promptSeed = useStore((s) => s.promptSeed);
+  const setPromptSeed = useStore((s) => s.setPromptSeed);
+
+  // 外部（chip / hot topic）填入 prompt：写入并 focus textarea
+  useEffect(() => {
+    if (!promptSeed) return;
+    setText(promptSeed);
+    setPromptSeed("");
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (ta) {
+        ta.focus();
+        // 移到末尾，方便继续编辑
+        const len = ta.value.length;
+        ta.setSelectionRange(len, len);
+        ta.style.height = "0px";
+        ta.style.height = Math.min(ta.scrollHeight, 180) + "px";
+      }
+    });
+  }, [promptSeed, setPromptSeed]);
 
   // 自动增高
   useEffect(() => {
