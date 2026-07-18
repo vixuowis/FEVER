@@ -50,6 +50,16 @@ export const SKILL_CN: Record<string, string> = {
   get_convert_bond_spot: "可转债实时",
   get_us_index_daily: "美股指数K线",
   get_index_list: "全球指数列表",
+  // 证据图（Argus 范式）
+  eg_add_evidence: "添加证据",
+  eg_add_claim: "添加推论",
+  eg_link: "链接证据↔推论",
+  eg_set_claim_status: "更新推论状态",
+  eg_merge_claims: "合并推论",
+  eg_add_missing: "记录研究缺口",
+  eg_set_sufficient: "标记研究充分",
+  eg_export: "导出证据图",
+  eg_clear: "重置证据图",
 };
 
 export function skillCn(name: string): string {
@@ -79,4 +89,5 @@ export const KIND_CN: Record<string, string> = {
   table: "数据表",
   evidence: "证据",
   report: "研究报告",
+  graph: "证据图",
 };

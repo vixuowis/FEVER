@@ -143,4 +143,5 @@ def ensure_skills_loaded() -> None:
     from . import (
         analysis, fundamentals, market, news,
         fundamentals_detail, boards, flows, holders, global_markets,
+        evidence_graph,
     )  # noqa: F401
