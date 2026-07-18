@@ -105,6 +105,7 @@ skill/prompt 策略更新」的长期自进化闭环。
 
 ## 📋 更新日志
 
+- **3.4.2** · 2026-07-19 · 修补：3.4.2: API 接口清理 — 移除前端 api.health/api.hotTopics（无人调用）；移除后端 /api/hot_topics 端点 + _build_hot_topics 热点缓存（前端已改用静态池）；修正 api.pinArtifact 返回类型 (Artifact) 与后端一致；SSEEvent 新增 team_members 字段以匹配后端 meta 事件。
 - **3.4.1** · 2026-07-19 · 修补：3.4.1: 右栏展开态改为 absolute 浮层（z-30 + 左侧投影），不再 shrink-0 挤占聊天区布局。App.tsx 把 ChatPanel + RightPanel 套进 relative 容器让 absolute 生效。
 - **3.4.0** · 2026-07-19 · 功能：3.4.0: 空态推荐改为 6 条（2 快速 + 2 专家 + 2 团队），顺序固定；「换一批」改为纯前端静态池洗牌（Fisher-Yates），瞬间完成（< 1ms），不再调后端。Agent 推荐自带 agent 字段，直接走单专家模式。修复 CHIP_PROMPTS 误写 ] 应为 \u007D 的语法错误。
 - **3.3.1** · 2026-07-19 · 修补：3.3.1: 空态 hero 调整 — 「换一批」按钮从顶部下移到建议问题下方居中；移除「热点来源」提示行；「团队」徽章从描述行右侧移到左侧图标下方。
