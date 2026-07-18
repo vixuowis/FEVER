@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Beaker, MessageSquareText, Plus, Trash2, Users, Wrench } from "lucide-react";
 import { relTime, cls } from "../utils";
 import { useStore } from "../store";
+import { VERSION } from "../version";
 
 /** 左栏：logo + 新研究 + case 列表 + 底部技能/团队入口 */
 export default function Sidebar() {
@@ -30,7 +31,7 @@ export default function Sidebar() {
       <div className="px-5 pb-4 pt-5">
         <div className="flex items-baseline gap-2">
           <h1 className="font-serif text-[22px] font-bold tracking-wide text-ink">FEVER</h1>
-          <span className="rounded bg-jade-soft px-1.5 py-px text-[10px] font-semibold text-jade">3.0.0</span>
+          <span className="rounded bg-jade-soft px-1.5 py-px text-[10px] font-semibold text-jade">{VERSION}</span>
         </div>
         <p className="mt-0.5 font-serif text-[11.5px] italic text-mute">Financial Event Research</p>
       </div>

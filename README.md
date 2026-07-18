@@ -103,6 +103,12 @@ skill/prompt 策略更新」的长期自进化闭环。
 - [ ] P2 TTRL v0：命中率统计、calibration 面板
 - [ ] P2 接入 Argus 深度采证引擎（见 v2 仓库归档）
 
+## 📋 更新日志
+
+- **3.1.1** · 2026-07-19 · 修补：右栏默认折叠 + UI 状态持久化；单 Agent 模式下拉独立成行避免遮挡；新增版本自动管理脚本 `scripts/bump.py`。
+- **3.1.0** · 2026-07-19 · 功能：单 Agent 模式直接调度专家、事件预测员（predictor）Agent 与 post_market_outlook 复合技能、产出物按类型分组、版本自动管理（`scripts/bump.py`）。
+- **3.0.0** · 2026-07-18 · 重大：四层调度模型（Tool → Skill → Agent → Team）落地；akshare 真实数据接入；证据图与深度研究团队上线；研究逻辑库（Logic Library）闭环。
+
 ## ⚠️ 免责声明
 
 本项目仅供学习与研究使用，所有输出不构成任何投资建议。

@@ -21,6 +21,32 @@ import { uid } from "./utils";
 /* ---------------- logic library 持久化 ---------------- */
 
 const LOGIC_KEY = "fever.logic_library.v1";
+const UI_KEY = "fever.ui.v1";
+
+interface UIPrefs {
+  rightOpen?: boolean;
+  rightTab?: RightTab;
+  mode?: Mode;
+  selectedAgent?: string;
+}
+
+function loadUIPrefs(): UIPrefs {
+  try {
+    const raw = localStorage.getItem(UI_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as UIPrefs;
+  } catch {
+    return {};
+  }
+}
+
+function saveUIPrefs(p: UIPrefs) {
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify(p));
+  } catch {
+    /* quota / private mode — silently ignore */
+  }
+}
 
 function loadLogicLibrary(): LogicItem[] {
   try {
@@ -413,12 +439,13 @@ export const useStore = create<FeverState>((set, get) => {
     artifacts: [],
     skills: [],
     agents: [],
-    rightTab: "artifacts",
-    rightOpen: true,
+    rightTab: loadUIPrefs().rightTab ?? "artifacts",
+    // 默认折叠右栏；上一次状态持久化到 localStorage（用户主动展开/收起后记住）
+    rightOpen: loadUIPrefs().rightOpen ?? false,
     selectedArtifactId: null,
     streaming: false,
-    mode: "auto",
-    selectedAgent: "predictor",
+    mode: loadUIPrefs().mode ?? "auto",
+    selectedAgent: loadUIPrefs().selectedAgent ?? "predictor",
     loadingCase: false,
     generatingReport: false,
     initialized: false,
@@ -646,11 +673,29 @@ export const useStore = create<FeverState>((set, get) => {
 
     selectArtifact: (id) => {
       set({ selectedArtifactId: id, rightTab: "artifacts", rightOpen: true });
+      const s = get();
+      saveUIPrefs({ rightTab: "artifacts", rightOpen: true, mode: s.mode, selectedAgent: s.selectedAgent });
     },
-    setRightTab: (t) => set({ rightTab: t, rightOpen: true }),
-    setRightOpen: (v) => set({ rightOpen: v }),
-    setMode: (m) => set({ mode: m }),
-    setSelectedAgent: (id) => set({ selectedAgent: id }),
+    setRightTab: (t) => {
+      set({ rightTab: t, rightOpen: true });
+      const s = get();
+      saveUIPrefs({ rightTab: t, rightOpen: true, mode: s.mode, selectedAgent: s.selectedAgent });
+    },
+    setRightOpen: (v) => {
+      set({ rightOpen: v });
+      const s = get();
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: v, mode: s.mode, selectedAgent: s.selectedAgent });
+    },
+    setMode: (m) => {
+      set({ mode: m });
+      const s = get();
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: m, selectedAgent: s.selectedAgent });
+    },
+    setSelectedAgent: (id) => {
+      set({ selectedAgent: id });
+      const s = get();
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: s.mode, selectedAgent: id });
+    },
 
     /* ---------------- research logic library ---------------- */
     addLogicItems: (items) => {
