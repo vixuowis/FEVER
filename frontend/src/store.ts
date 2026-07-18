@@ -25,6 +25,7 @@ const UI_KEY = "fever.ui.v1";
 
 interface UIPrefs {
   rightOpen?: boolean;
+  leftOpen?: boolean;
   rightTab?: RightTab;
   mode?: Mode;
   selectedAgent?: string;
@@ -246,6 +247,7 @@ interface FeverState {
   agents: AgentMeta[];
   rightTab: RightTab;
   rightOpen: boolean;
+  leftOpen: boolean;
   selectedArtifactId: string | null;
   streaming: boolean;
   mode: Mode;
@@ -274,6 +276,7 @@ interface FeverState {
   selectArtifact: (id: string | null) => void;
   setRightTab: (t: RightTab) => void;
   setRightOpen: (v: boolean) => void;
+  setLeftOpen: (v: boolean) => void;
   setMode: (m: Mode) => void;
   setSelectedAgent: (id: string) => void;
   setTeamMembers: (ids: string[]) => void;
@@ -451,6 +454,8 @@ export const useStore = create<FeverState>((set, get) => {
     rightTab: loadUIPrefs().rightTab ?? "artifacts",
     // 默认折叠右栏；上一次状态持久化到 localStorage（用户主动展开/收起后记住）
     rightOpen: loadUIPrefs().rightOpen ?? false,
+    // 左栏默认展开（案例列表是主入口）；持久化记忆
+    leftOpen: loadUIPrefs().leftOpen ?? true,
     selectedArtifactId: null,
     streaming: false,
     mode: loadUIPrefs().mode ?? "auto",
@@ -699,40 +704,46 @@ export const useStore = create<FeverState>((set, get) => {
     selectArtifact: (id) => {
       set({ selectedArtifactId: id, rightTab: "artifacts", rightOpen: true });
       const s = get();
-      saveUIPrefs({ rightTab: "artifacts", rightOpen: true, mode: s.mode,
-                    selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
+      saveUIPrefs({ rightTab: "artifacts", rightOpen: true, leftOpen: s.leftOpen,
+                    mode: s.mode, selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
     },
 
     /** 通用持久化：传入要修改的字段，回填其它字段当前值后整体保存 */
     setRightTab: (t) => {
       set({ rightTab: t, rightOpen: true });
       const s = get();
-      saveUIPrefs({ rightTab: t, rightOpen: true, mode: s.mode,
-                    selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
+      saveUIPrefs({ rightTab: t, rightOpen: true, leftOpen: s.leftOpen,
+                    mode: s.mode, selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
     },
     setRightOpen: (v) => {
       set({ rightOpen: v });
       const s = get();
-      saveUIPrefs({ rightTab: s.rightTab, rightOpen: v, mode: s.mode,
-                    selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: v, leftOpen: s.leftOpen,
+                    mode: s.mode, selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
+    },
+    setLeftOpen: (v) => {
+      set({ leftOpen: v });
+      const s = get();
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, leftOpen: v,
+                    mode: s.mode, selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
     },
     setMode: (m) => {
       set({ mode: m });
       const s = get();
-      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: m,
-                    selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, leftOpen: s.leftOpen,
+                    mode: m, selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
     },
     setSelectedAgent: (id) => {
       set({ selectedAgent: id });
       const s = get();
-      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: s.mode,
-                    selectedAgent: id, teamMembers: s.teamMembers });
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, leftOpen: s.leftOpen,
+                    mode: s.mode, selectedAgent: id, teamMembers: s.teamMembers });
     },
     setTeamMembers: (ids) => {
       set({ teamMembers: ids });
       const s = get();
-      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: s.mode,
-                    selectedAgent: s.selectedAgent, teamMembers: ids });
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, leftOpen: s.leftOpen,
+                    mode: s.mode, selectedAgent: s.selectedAgent, teamMembers: ids });
     },
 
     setPromptSeed: (s) => {
