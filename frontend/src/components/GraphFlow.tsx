@@ -142,14 +142,21 @@ function buildOption(payload: any) {
         const d = params.data || {};
         const status = d._status ? ` · <span style="color:${NODE_COLOR[d._status] || MUTE}">${d._status}</span>` : "";
         const conf = d._confidence != null ? ` · 置信度 ${Number(d._confidence).toFixed(2)}` : "";
-        const body = d._body ? `<div style="margin-top:4px;color:${MUTE};max-width:280px;line-height:1.5">${escapeHtml(String(d._body)).slice(0, 280)}${String(d._body).length > 280 ? "…" : ""}</div>` : "";
-        const src = d._sourceRef ? `<div style="margin-top:4px;font-family:monospace;font-size:10.5px;color:${FAINT}">src: ${escapeHtml(String(d._sourceRef)).slice(0, 80)}</div>` : "";
-        return `
-          <div style="font-weight:600;color:#1C1B1A">${KIND_LABEL[d._kind] || d._kind} · ${escapeHtml(String(d._title || d.id))}</div>
-          <div style="margin-top:2px;font-size:11px;color:${MUTE}">${d.id}${status}${conf}</div>
-          ${body}
-          ${src}
-        `;
+
+        // 标题：限制每行 18 个汉字 / 36 字母，多行换行；最多 4 行
+        const rawTitle = String(d._title || d.id);
+        const wrappedTitle = wrapText(rawTitle, 18, 4);
+        // body：限制每行 30 字符，限制总长，最多 6 行
+        const rawBody = d._body ? String(d._body) : "";
+        const wrappedBody = rawBody ? wrapText(rawBody, 30, 6) : "";
+
+        const titleHtml = `<div style="font-weight:600;color:#1C1B1A;line-height:1.45;word-break:break-word;white-space:pre-wrap">${escapeHtml(wrappedTitle)}</div>`;
+        const metaHtml = `<div style="margin-top:3px;font-size:11px;color:${MUTE};white-space:nowrap">${d.id}${status}${conf}</div>`;
+        const bodyHtml = wrappedBody ? `<div style="margin-top:4px;color:${MUTE};max-width:280px;line-height:1.5;word-break:break-word;white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical">${escapeHtml(wrappedBody)}</div>` : "";
+        const src = d._sourceRef
+          ? `<div style="margin-top:4px;font-family:monospace;font-size:10.5px;color:${FAINT};word-break:break-all;line-height:1.4">src: ${escapeHtml(String(d._sourceRef))}</div>`
+          : "";
+        return `${titleHtml}${metaHtml}${bodyHtml}${src}`;
       },
     },
     legend: {
@@ -201,6 +208,87 @@ function buildOption(payload: any) {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** 简单换行：按"近自然宽点"切，长度阈值 charsPerLine，最多 maxLines 行。
+ * 优先在空格/标点处换行（避免英文词中间断），否则硬切。
+ * 含中文（CJK）时按字符数算，含空白时按词算。
+ */
+function wrapText(text: string, charsPerLine: number, maxLines: number): string {
+  if (!text) return "";
+  // 预先把换行符去掉，再统一处理
+  const flat = text.replace(/[\r\n]+/g, " ").trim();
+  if (!flat) return "";
+
+  // 判断是否包含 CJK 字符
+  const hasCJK = /[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(flat);
+
+  // 切分策略：
+  // - CJK 主导：按字符切，标点也单算 token（避免标点顶到行首）
+  //   但同一组连续 ASCII 字符（数字串、英文短词）作为一个 token
+  // - 西文：按空格切词；纯西文无空格（如 URL）时按字符切
+  const tokens: string[] = [];
+  if (hasCJK) {
+    // 把连续 ASCII 看成一个 token（如 600519、Q3、Apple），
+    // 其余 CJK 字符单算
+    const re = /([A-Za-z0-9_:/.\-?&=+%@#]+)|([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(flat)) !== null) {
+      tokens.push(m[0]);
+    }
+  } else if (/\s/.test(flat)) {
+    tokens.push(...flat.split(/\s+/).filter(Boolean));
+  } else {
+    tokens.push(...Array.from(flat));
+  }
+
+  // 段内连接规则：
+  // - 纯西文（token 之间会按空格显示）→ 用空格连接
+  // - CJK → 紧贴（不加空格）
+  const joinSep = hasCJK ? "" : " ";
+
+  const lines: string[] = [];
+  let current = "";
+  let currentLen = 0;
+  for (const t of tokens) {
+    const tLen = displayWidth(t);
+    if (currentLen === 0) {
+      current = t;
+      currentLen = tLen;
+      continue;
+    }
+    const sepLen = displayWidth(joinSep);
+    if (currentLen + sepLen + tLen <= charsPerLine) {
+      current += joinSep + t;
+      currentLen += sepLen + tLen;
+    } else {
+      lines.push(current);
+      if (lines.length >= maxLines) break;
+      current = t;
+      currentLen = tLen;
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+
+  // 如果超 maxLines，把最后一行用省略号收尾
+  if (lines.length >= maxLines) {
+    const usedChars = lines.reduce((s, l) => s + displayWidth(l), 0);
+    if (usedChars < displayWidth(flat)) {
+      const last = lines[lines.length - 1].replace(/[\s\u2026]+$/, "");
+      lines[lines.length - 1] = last + "…";
+    }
+  }
+  return lines.join("\n");
+}
+
+/** 估算 token 显示宽度：CJK 字符按 2，ASCII 按 1。 */
+function displayWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) {
+    if (/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch)) w += 2;
+    else w += 1;
+  }
+  return w;
 }
 
 /** 证据图力导向可视化：节点=evidence/claim/missing，边=supports/contradicts/context/addresses */
