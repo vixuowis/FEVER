@@ -715,27 +715,29 @@ export default function RightPanel() {
   return (
     <aside className="flex h-full w-[400px] shrink-0 flex-col border-l border-edge bg-[#FBFAF8]">
       {/* tab 头 */}
-      <div className="flex items-center gap-1 border-b border-edge px-3 py-2">
+      <div className="flex items-center gap-1 border-b border-edge px-2.5 py-2">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setRightTab(t.id)}
             className={cls(
-              "relative flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors",
-              rightTab === t.id ? "bg-card text-ink shadow-card border border-edge" : "text-mute hover:text-ink",
+              "relative flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-transparent px-2 py-1.5 text-[12px] font-medium transition-colors",
+              rightTab === t.id
+                ? "bg-card text-ink shadow-card border-edge"
+                : "text-mute hover:bg-card/60 hover:text-ink",
             )}
           >
             {t.icon}
-            {t.label}
+            <span className="truncate">{t.label}</span>
             {t.id === "artifacts" && artifactCount > 0 && (
-              <span className="rounded-full bg-brand-soft px-1.5 text-[10.5px] font-semibold text-brand">
+              <span className="rounded-full bg-brand-soft px-1.5 text-[10px] font-semibold text-brand">
                 {artifactCount}
               </span>
             )}
             {t.id === "logic" && logicCount > 0 && (
               <span
                 className={cls(
-                  "rounded-full px-1.5 text-[10.5px] font-semibold",
+                  "rounded-full px-1.5 text-[10px] font-semibold",
                   pendingLogicCount > 0 ? "bg-brand text-card" : "bg-[#F4F2EE] text-faint",
                 )}
               >
