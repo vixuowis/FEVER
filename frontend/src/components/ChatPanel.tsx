@@ -147,7 +147,6 @@ function Hero() {
     return FALLBACK_SUGGESTIONS;
   });
   const [refreshing, setRefreshing] = useState(false);
-  const [source, setSource] = useState<string>("");
 
   // 首次挂载：拉一次新鲜数据
   useEffect(() => {
@@ -165,7 +164,6 @@ function Hero() {
             query: it.query,
           }));
           setSuggestions(mapped);
-          setSource(r.source);
           saveCachedTopics(mapped);
         }
       })
@@ -191,7 +189,6 @@ function Hero() {
           query: it.query,
         }));
         setSuggestions(mapped);
-        setSource(r.source);
         saveCachedTopics(mapped);
       }
     } catch {
@@ -204,21 +201,9 @@ function Hero() {
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-6 py-10">
       <div className="w-full max-w-2xl animate-fadeUp">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-[11.5px] font-medium tracking-widest text-jade">
-            <Sparkles size={13} />
-            FIN EVENT RESEARCH WORKBENCH
-          </div>
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={refreshing || streaming}
-            className="flex items-center gap-1 rounded-full border border-edge bg-card px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50"
-            title="根据当前热点事件刷新推荐"
-          >
-            <RefreshIcon spinning={refreshing} />
-            换一批
-          </button>
+        <div className="flex items-center gap-2 text-[11.5px] font-medium tracking-widest text-jade">
+          <Sparkles size={13} />
+          FIN EVENT RESEARCH WORKBENCH
         </div>
         <h2 className="mt-3 font-serif text-[34px] font-bold leading-tight text-ink">
           Hunt events. <span className="text-brand">Trace echoes.</span>
@@ -241,27 +226,35 @@ function Hero() {
               }}
               className="group flex items-start gap-3 rounded-card border border-edge bg-card px-4 py-3.5 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-pop disabled:opacity-50"
             >
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand transition-colors group-hover:bg-brand group-hover:text-card">
-                {ICON_BY_HINT[s.icon_hint] ?? <Newspaper size={16} />}
+              <span className="flex shrink-0 flex-col items-center gap-1">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-soft text-brand transition-colors group-hover:bg-brand group-hover:text-card">
+                  {ICON_BY_HINT[s.icon_hint] ?? <Newspaper size={16} />}
+                </span>
+                {s.mode === "team" && (
+                  <span className="rounded bg-jade-soft px-1.5 py-px text-[10px] font-semibold text-jade">团队</span>
+                )}
               </span>
               <span className="min-w-0">
                 <span className="block text-[13.5px] font-medium leading-snug text-ink">{s.text}</span>
-                <span className="mt-1 flex items-center gap-1.5 text-[11.5px] text-faint">
-                  {s.desc}
-                  {s.mode === "team" && (
-                    <span className="rounded bg-jade-soft px-1.5 py-px text-[10px] font-semibold text-jade">团队</span>
-                  )}
-                </span>
+                <span className="mt-1 block text-[11.5px] text-faint">{s.desc}</span>
               </span>
             </button>
           ))}
         </div>
 
-        {source && (
-          <div className="mt-2 text-right text-[10.5px] text-faint">
-            热点来源：{source}
-          </div>
-        )}
+        {/* 换一批：放在建议问题下方居中 */}
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={refreshing || streaming}
+            className="flex items-center gap-1 rounded-full border border-edge bg-card px-2.5 py-1 text-[11px] text-mute transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50"
+            title="根据当前热点事件刷新推荐"
+          >
+            <RefreshIcon spinning={refreshing} />
+            换一批
+          </button>
+        </div>
 
         {/* 能力 chips */}
         <div className="mt-6 flex flex-wrap items-center gap-1.5">
