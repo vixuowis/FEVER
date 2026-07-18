@@ -62,17 +62,37 @@ const ICON_BY_HINT: Record<string, React.ReactNode> = {
 
 const CHIPS = ["日K行情", "财经快讯", "公告检索", "财务摘要", "事件研究 CAR", "宏观指标", "龙虎榜", "融资融券", "研报评级"];
 
-/** chip 标签 → 点击后填到 composer 的 prompt 模板；`<标的>` 是占位符。 */
-const CHIP_PROMPTS: Record<string, string> = {
-  "日K行情": "用日K行情分析 <标的> 的近期走势",
-  "财经快讯": "看下最近的重要财经快讯",
-  "公告检索": "检索 <标的> 的最新公告",
-  "财务摘要": "查一下 <标的> 的财务摘要",
-  "事件研究 CAR": "对 <标的> 做一次事件研究 CAR 分析",
-  "宏观指标": "看下最新宏观指标（CPI / PMI / M2）",
-  "龙虎榜": "看下最新龙虎榜",
-  "融资融券": "查 <标的> 的融资融券数据",
-  "研报评级": "查 <标的> 的最新研报评级",
+/** 热门 A 股池：每次点击 chip 时随机抽一只，让示例 prompt 不刻板 */
+const STOCK_POOL: { code: string; name: string }[] = [
+  { code: "600519", name: "贵州茅台" },
+  { code: "000858", name: "五粮液" },
+  { code: "300750", name: "宁德时代" },
+  { code: "600036", name: "招商银行" },
+  { code: "002594", name: "比亚迪" },
+  { code: "601318", name: "中国平安" },
+  { code: "000333", name: "美的集团" },
+  { code: "600276", name: "恒瑞医药" },
+  { code: "601012", name: "隆基绿能" },
+  { code: "688981", name: "中芯国际" },
+  { code: "601899", name: "紫金矿业" },
+  { code: "600030", name: "中信证券" },
+  { code: "000651", name: "格力电器" },
+  { code: "002475", name: "立讯精密" },
+  { code: "601138", name: "工业富联" },
+];
+const pickStock = () => STOCK_POOL[Math.floor(Math.random() * STOCK_POOL.length)];
+
+/** chip 标签 → 每次点击返回一个具体 prompt 字符串（标的随机抽，宏观类无标的） */
+const CHIP_PROMPTS: Record<string, () => string> = {
+  "日K行情": () => { const s = pickStock(); return `用日K行情分析 ${s.code}（${s.name}）的近期走势`; },
+  "财经快讯": () => "看下最近的重要财经快讯",
+  "公告检索": () => { const s = pickStock(); return `检索 ${s.code}（${s.name}）的最新公告`; },
+  "财务摘要": () => { const s = pickStock(); return `查一下 ${s.code}（${s.name}）的财务摘要`; },
+  "事件研究 CAR": () => { const s = pickStock(); return `对 ${s.code}（${s.name}）做一次事件研究 CAR 分析`; },
+  "宏观指标": () => "看下最新宏观指标（CPI / PMI / M2）",
+  "龙虎榜": () => "看下最新龙虎榜",
+  "融资融券": () => { const s = pickStock(); return `查 ${s.code}（${s.name}）的融资融券数据`; },
+  "研报评级": () => { const s = pickStock(); return `查 ${s.code}（${s.name}）的最新研报评级`; },
 };
 
 const HOT_CACHE_KEY = "fever.hot_topics.v1";
@@ -250,8 +270,8 @@ function Hero() {
             <button
               key={c}
               type="button"
-              title={CHIP_PROMPTS[c]}
-              onClick={() => setPromptSeed(CHIP_PROMPTS[c] ?? c)}
+              title="点击填入示例 prompt 到输入框"
+              onClick={() => setPromptSeed((CHIP_PROMPTS[c] ?? (() => c))())}
               className="rounded-full border border-edge bg-card px-2.5 py-1 text-[11.5px] text-mute transition-all hover:border-jade/40 hover:bg-jade-soft hover:text-jade active:scale-95"
             >
               {c}
