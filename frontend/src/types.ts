@@ -1,6 +1,6 @@
 // 与后端 schemas 对齐的类型定义（docs/design.md §7/§8/§9）
 
-export type Mode = "auto" | "team";
+export type Mode = "auto" | "agent" | "team";
 export type RightTab = "artifacts" | "skills" | "team" | "logic";
 export type ArtifactKind = "kline" | "line" | "table" | "evidence" | "report" | "graph";
 

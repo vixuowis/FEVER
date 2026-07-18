@@ -9,7 +9,12 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     case_id: Optional[str] = None
     message: str = Field(..., min_length=1)
-    mode: Literal["auto", "team"] = "auto"
+    # auto  → 单个 router Agent（主理人 + 工具循环）
+    # agent → 直接调单个指定 Agent（agent 字段必填；如缺省则降级为 router）
+    # team  → Planner 拆解 + 多专家串行 + 复核 + 提炼
+    mode: Literal["auto", "agent", "team"] = "auto"
+    # mode="agent" 时指定具体 agent_id（predictor / market_analyst / event_scout 等）
+    agent: Optional[str] = None
 
 
 class CreateCaseRequest(BaseModel):

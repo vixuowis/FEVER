@@ -212,8 +212,8 @@ AGENTS: dict[str, dict] = {
 }
 
 
-def get_agent(agent_id: str) -> dict:
-    return AGENTS[agent_id]
+def get_agent(agent_id: str) -> dict | None:
+    return AGENTS.get(agent_id)
 
 
 def roster_public() -> list[dict]:

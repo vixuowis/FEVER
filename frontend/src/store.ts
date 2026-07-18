@@ -221,6 +221,8 @@ interface FeverState {
   selectedArtifactId: string | null;
   streaming: boolean;
   mode: Mode;
+  /** mode="agent" 时选定要直接调用的 Agent id（predictor / market_analyst / event_scout ...） */
+  selectedAgent: string;
   loadingCase: boolean;
   generatingReport: boolean;
   initialized: boolean;
@@ -231,7 +233,7 @@ interface FeverState {
   logicLibOpen: boolean;
 
   init: () => Promise<void>;
-  sendMessage: (text: string, mode?: Mode) => Promise<void>;
+  sendMessage: (text: string, mode?: Mode, agent?: string) => Promise<void>;
   stop: () => void;
   loadCase: (id: string) => Promise<void>;
   newCase: () => void;
@@ -242,6 +244,7 @@ interface FeverState {
   setRightTab: (t: RightTab) => void;
   setRightOpen: (v: boolean) => void;
   setMode: (m: Mode) => void;
+  setSelectedAgent: (id: string) => void;
 
   /** 库操作：新增/更新/忽略 */
   addLogicItems: (items: LogicItem[]) => void;
@@ -415,6 +418,7 @@ export const useStore = create<FeverState>((set, get) => {
     selectedArtifactId: null,
     streaming: false,
     mode: "auto",
+    selectedAgent: "predictor",
     loadingCase: false,
     generatingReport: false,
     initialized: false,
@@ -437,12 +441,14 @@ export const useStore = create<FeverState>((set, get) => {
       });
     },
 
-    sendMessage: async (text, mode) => {
+    sendMessage: async (text, mode, agent) => {
       const content = text.trim();
       if (!content || get().streaming) return;
       // 防御性：进入时先 abort 任何残留的旧 controller（HMR / 异常路径留下的孤儿）
       abortCtl?.abort();
       const useMode = mode ?? get().mode;
+      // agent 模式下：取调用方传入的 agent；fallback 到 state.selectedAgent
+      const useAgent = agent ?? (useMode === "agent" ? get().selectedAgent : null);
 
       let caseId = get().currentCaseId;
       if (!caseId) {
@@ -487,7 +493,7 @@ export const useStore = create<FeverState>((set, get) => {
       currentCtx = { caseId, messageId: asstMsg.id, question: content };
       try {
         await streamChat(
-          { case_id: caseId, message: content, mode: useMode },
+          { case_id: caseId, message: content, mode: useMode, agent: useAgent },
           { onEvent: handleEvent, signal: abortCtl.signal },
         );
         // 流正常结束但未收到 done/error 时兜底收尾
@@ -644,6 +650,7 @@ export const useStore = create<FeverState>((set, get) => {
     setRightTab: (t) => set({ rightTab: t, rightOpen: true }),
     setRightOpen: (v) => set({ rightOpen: v }),
     setMode: (m) => set({ mode: m }),
+    setSelectedAgent: (id) => set({ selectedAgent: id }),
 
     /* ---------------- research logic library ---------------- */
     addLogicItems: (items) => {

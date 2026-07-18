@@ -112,7 +112,7 @@ export interface StreamHandlers {
  * 避免浏览器把 in-flight 请求标记为 ERR_ABORTED 写到 Console。
  */
 export async function streamChat(
-  body: { case_id: string; message: string; mode: Mode },
+  body: { case_id: string; message: string; mode: Mode; agent?: string | null },
   { onEvent, signal }: StreamHandlers,
 ): Promise<void> {
   // 进入前先看 signal；已 abort 则不发请求

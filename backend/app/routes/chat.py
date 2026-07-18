@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from .. import config, db
-from ..agents.roster import get_agent, system_prompt
+from ..agents.roster import AGENTS, get_agent, system_prompt
 from ..agents.team import run_team
 from ..llm import complete_text, run_agent
 from ..schemas import ChatRequest, sse
@@ -62,7 +62,7 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
             db.add_artifact, case_id, message_id, kind, title, payload
         )
 
-    yield sse({"type": "meta", "case_id": case_id, "mode": req.mode})
+    yield sse({"type": "meta", "case_id": case_id, "mode": req.mode, "agent": req.agent})
     try:
         if req.mode == "team":
             # team 模式：history 传给 synthesize；问题原文作为规划输入
@@ -70,14 +70,25 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
             async for ev in run_team(req.message, hist_for_team, state, artifact_store):
                 yield sse(ev)
         else:
-            messages = [{"role": "system", "content": system_prompt("router")}] + history
-            async for ev in run_agent("router", messages, agent_def=get_agent("router"),
+            # mode == "agent" | "auto"：单 Agent 工具循环
+            # 优先级：req.agent → "router"（向后兼容）
+            agent_id = (req.agent or "").strip() or "router"
+            agent_def = get_agent(agent_id)
+            if agent_def is None:
+                valid = ", ".join(sorted(AGENTS.keys()))
+                yield sse({"type": "error",
+                           "message": f"未知 Agent「{agent_id}」。可用: {valid}"})
+                return
+            messages = [{"role": "system", "content": system_prompt(agent_id)}] + history
+            async for ev in run_agent(agent_id, messages, agent_def=agent_def,
                                       state=state, artifact_store=artifact_store,
                                       max_rounds=config.AUTO_MAX_ROUNDS):
                 yield sse(ev)
 
         # 2) 落库 assistant message（content + tool_trace JSON）
-        db.add_message(case_id, role="assistant", agent="router",
+        # agent 模式下记录实际调用的 agent_id
+        record_agent = req.agent if req.mode == "agent" and req.agent else "router"
+        db.add_message(case_id, role="assistant", agent=record_agent,
                        content=state["content"], tool_trace=state["tool_trace"] or None,
                        message_id=message_id)
 
@@ -92,7 +103,8 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
         # 尽力保留已产出内容
         try:
             if state["content"] or state["tool_trace"]:
-                db.add_message(case_id, role="assistant", agent="router",
+                err_agent = req.agent if req.mode == "agent" and req.agent else "router"
+                db.add_message(case_id, role="assistant", agent=err_agent,
                                content=state["content"],
                                tool_trace=state["tool_trace"] or None,
                                message_id=message_id)

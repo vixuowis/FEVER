@@ -21,6 +21,11 @@ export default {
           soft: "#E4F0EE",
           hover: "#115E59",
         },
+        violet: {
+          DEFAULT: "#7C3AED",
+          soft: "#F1ECFE",
+          hover: "#6D28D9",
+        },
         rise: "#D14343",
         fall: "#2E9E5B",
       },
