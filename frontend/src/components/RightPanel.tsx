@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   Beaker,
   Check,
+  ChevronDown,
+  ChevronRight,
   Copy,
   ExternalLink,
   FileText,
@@ -15,10 +17,11 @@ import {
   PinOff,
   Users,
   Wrench,
-  ChevronDown,
-  ChevronRight,
   Eye,
   EyeOff,
+  BarChart3,
+  Network,
+  Newspaper,
 } from "lucide-react";
 import type { Artifact, EvidencePayload, ReportPayload, SkillMeta } from "../types";
 import { KIND_CN, skillCn } from "../names";
@@ -200,43 +203,118 @@ function ArtifactList() {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4">
-        {artifacts.map((a) => (
-          <div key={a.id} className="group relative">
-            <button
-              onClick={() => selectArtifact(a.id)}
-              className={cls(
-                "flex w-full items-center gap-3 rounded-card border bg-card px-3 py-2.5 text-left shadow-card transition-all duration-150 hover:-translate-y-px hover:shadow-pop",
-                selectedId === a.id ? "border-jade/60 ring-1 ring-jade/30" : "border-edge hover:border-edgeDark",
-              )}
-            >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-jade-soft text-jade">
-                <KindIcon kind={a.kind} size={15} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12.5px] font-medium text-ink">
-                  {!!a.pinned && <Pin size={10} className="mr-1 inline -translate-y-px text-brand" />}
-                  {a.title}
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4">
+        {(() => {
+          // 分组：置顶 → 图表（kline/line）→ 表格（table）→ 证据（evidence）→ 报告/图谱（report/graph）→ 其它
+          const groups: Array<{ key: string; label: string; kinds: string[] }> = [
+            { key: "pinned", label: "已置顶", kinds: ["pinned"] },
+            { key: "chart", label: "图表", kinds: ["kline", "line"] },
+            { key: "table", label: "数据表", kinds: ["table"] },
+            { key: "evidence", label: "资讯证据", kinds: ["evidence"] },
+            { key: "study", label: "深度研究", kinds: ["graph", "report"] },
+          ];
+          const pinned = artifacts.filter((a) => a.pinned);
+          const byKind: Record<string, typeof artifacts> = { kline: [], line: [], table: [], evidence: [], graph: [], report: [] };
+          for (const a of artifacts) {
+            if (a.pinned) continue;
+            (byKind[a.kind] ||= []).push(a);
+          }
+          const renderCard = (a: any) => (
+            <div key={a.id} className="group relative">
+              <button
+                onClick={() => selectArtifact(a.id)}
+                className={cls(
+                  "flex w-full items-center gap-3 rounded-card border bg-card px-3 py-2.5 text-left shadow-card transition-all duration-150 hover:-translate-y-px hover:shadow-pop",
+                  selectedId === a.id ? "border-jade/60 ring-1 ring-jade/30" : "border-edge hover:border-edgeDark",
+                )}
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-jade-soft text-jade">
+                  <KindIcon kind={a.kind} size={15} />
                 </span>
-                <span className="mt-0.5 block text-[11px] text-faint">
-                  {KIND_CN[a.kind] ?? a.kind} · {relTime(a.created_at)}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12.5px] font-medium text-ink">
+                    {!!a.pinned && <Pin size={10} className="mr-1 inline -translate-y-px text-brand" />}
+                    {a.title}
+                  </span>
+                  <span className="mt-0.5 block text-[11px] text-faint">
+                    {KIND_CN[a.kind] ?? a.kind} · {relTime(a.created_at)}
+                  </span>
                 </span>
-              </span>
-            </button>
-            <button
-              onClick={() => void pinArtifact(a.id)}
-              title={a.pinned ? "取消置顶" : "置顶"}
-              className={cls(
-                "absolute right-2 top-2 rounded-md p-1 transition-all",
-                a.pinned
-                  ? "text-brand opacity-100"
-                  : "text-faint opacity-0 hover:bg-edge/60 hover:text-brand group-hover:opacity-100",
+              </button>
+              <button
+                onClick={() => void pinArtifact(a.id)}
+                title={a.pinned ? "取消置顶" : "置顶"}
+                className={cls(
+                  "absolute right-2 top-2 rounded-md p-1 transition-all",
+                  a.pinned
+                    ? "text-brand opacity-100"
+                    : "text-faint opacity-0 hover:bg-edge/60 hover:text-brand group-hover:opacity-100",
+                )}
+              >
+                {a.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+              </button>
+            </div>
+          );
+
+          return (
+            <>
+              {pinned.length > 0 && (
+                <GroupSection
+                  label="已置顶"
+                  icon={<Pin size={12} className="text-brand" />}
+                  count={pinned.length}
+                  defaultOpen
+                >
+                  {pinned.map(renderCard)}
+                </GroupSection>
               )}
-            >
-              {a.pinned ? <PinOff size={12} /> : <Pin size={12} />}
-            </button>
-          </div>
-        ))}
+
+              <GroupSection
+                label="图表"
+                icon={<BarChart3 size={12} className="text-jade" />}
+                count={(byKind.kline.length || 0) + (byKind.line.length || 0)}
+                defaultOpen={pinned.length === 0}
+              >
+                {[...byKind.kline, ...byKind.line].map(renderCard)}
+                {byKind.kline.length + byKind.line.length === 0 && (
+                  <EmptyHint text="K线 / 走势 / 资金曲线等图表" />
+                )}
+              </GroupSection>
+
+              <GroupSection
+                label="数据表"
+                icon={<FolderOpen size={12} className="text-mute" />}
+                count={byKind.table.length}
+                defaultOpen={false}
+              >
+                {byKind.table.map(renderCard)}
+                {byKind.table.length === 0 && <EmptyHint text="板块、股东、财务等结构化数据" />}
+              </GroupSection>
+
+              <GroupSection
+                label="资讯证据"
+                icon={<Newspaper size={12} className="text-mute" />}
+                count={byKind.evidence.length}
+                defaultOpen={false}
+              >
+                {byKind.evidence.map(renderCard)}
+                {byKind.evidence.length === 0 && <EmptyHint text="新闻、公告、快讯" />}
+              </GroupSection>
+
+              <GroupSection
+                label="深度研究"
+                icon={<Network size={12} className="text-brand" />}
+                count={(byKind.graph.length || 0) + (byKind.report.length || 0)}
+                defaultOpen={true}
+              >
+                {[...byKind.graph, ...byKind.report].map(renderCard)}
+                {byKind.graph.length + byKind.report.length === 0 && (
+                  <EmptyHint text="证据图与研究报告（团队模式自动产出）" />
+                )}
+              </GroupSection>
+            </>
+          );
+        })()}
 
         {artifacts.length === 0 && (
           <div className="flex h-full min-h-[240px] flex-col items-center justify-center px-6 text-center">
@@ -251,6 +329,54 @@ function ArtifactList() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** 分组折叠：可独立开合，头部含图标 + 标题 + 数量徽章。 */
+function GroupSection({
+  label,
+  icon,
+  count,
+  defaultOpen,
+  children,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  count: number;
+  defaultOpen: boolean;
+  children: React.ReactNode;
+}) {
+  // 始终渲染标题；如果组为空且 defaultOpen，children 区域里会有 EmptyHint
+  return (
+    <details className="group" open={defaultOpen}>
+      <summary
+        className={cls(
+          "sticky top-0 z-10 -mx-1 mb-1.5 flex cursor-pointer list-none items-center gap-2 rounded-md bg-page/85 px-1 py-1.5 backdrop-blur-sm transition-colors hover:bg-edge/40",
+          "select-none",
+        )}
+      >
+        <ChevronRight
+          size={12}
+          className="text-faint transition-transform group-open:rotate-90"
+        />
+        {icon}
+        <span className="text-[11.5px] font-medium uppercase tracking-wide text-ink">
+          {label}
+        </span>
+        <span className="rounded-full bg-edge/70 px-1.5 py-px text-[10.5px] font-medium text-mute">
+          {count}
+        </span>
+      </summary>
+      <div className="space-y-2 pl-1">{children}</div>
+    </details>
+  );
+}
+
+function EmptyHint({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-edge/80 bg-card/40 px-3 py-2 text-[11px] text-faint">
+      暂无 · {text}
     </div>
   );
 }
