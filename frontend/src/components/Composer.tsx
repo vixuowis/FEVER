@@ -51,17 +51,17 @@ export default function Composer() {
   };
 
   const modes: { id: Mode; label: string; icon: React.ReactNode; hint: string; color: string }[] = [
-    { id: "auto", label: "快速问答", icon: <Zap size={13} />, hint: "主理人 · 工具循环", color: "bg-brand" },
-    { id: "agent", label: "单 Agent", icon: <UserCircle2 size={13} />, hint: "直接调度单个专家", color: "bg-violet" },
-    { id: "team", label: "深度研究团队", icon: <Users size={13} />, hint: "Planner + 专家 + 复核", color: "bg-jade" },
+    { id: "auto", label: "快速", icon: <Zap size={13} />, hint: "主理人 · 工具循环", color: "bg-brand" },
+    { id: "agent", label: "专家", icon: <UserCircle2 size={13} />, hint: "直接调度单个专家", color: "bg-violet" },
+    { id: "team", label: "团队", icon: <Users size={13} />, hint: "Planner 拆解 · 专家串行 · 复核", color: "bg-jade" },
   ];
 
   const placeholder =
     mode === "team"
-      ? `提出一个需要多角度深挖的问题，研究团队会按 ${teamMembers.length} 个专家调度…`
+      ? `研究团队 ${teamMembers.length} 人调度 · Planner 拆解 + 专家串行 + 复核…`
       : mode === "agent" && currentAgent
-        ? `直接问「${currentAgent.name}」…`
-        : "询问任何财经事件、行情、公告、宏观问题…";
+        ? `直接问「${currentAgent.name}」· 单专家 ≤8 轮工具循环…`
+        : "主理人调度 · 任何财经事件、行情、公告、宏观问题…";
 
   // team 模式 chip 文案：0 选 = "仅深度研究"，否则 N 个专家
   const teamChipText = teamMembers.length === 0
@@ -123,11 +123,6 @@ export default function Composer() {
                 </button>
               )}
             </div>
-            <span className="hidden text-[11px] text-faint sm:block">
-              {mode === "team" ? "Planner 拆解 · 专家串行 · 复核" :
-               mode === "agent" ? `单 Agent · ≤8 轮工具循环` :
-               "主理人 · ≤8 轮工具循环"}
-            </span>
           </div>
 
           <textarea
