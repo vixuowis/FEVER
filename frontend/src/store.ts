@@ -262,6 +262,22 @@ let abortCtl: AbortController | null = null;
 /** 当前流式所属 case / message / question：logic_items 事件入库存档时使用 */
 let currentCtx: { caseId: string; messageId: string; question: string } | null = null;
 
+// 页面隐藏 / 关闭 / 切换 tab 时主动 abort in-flight 请求，
+// 避免浏览器随后再用 net::ERR_ABORTED 强 abort、留下 console 噪音。
+// 装上 once: true + capture，避免被业务清理时漏掉。
+if (typeof window !== "undefined") {
+  const silentAbort = () => {
+    if (abortCtl) {
+      try { abortCtl.abort(); } catch { /* ignore */ }
+    }
+  };
+  window.addEventListener("pagehide", silentAbort, { capture: true });
+  window.addEventListener("beforeunload", silentAbort, { capture: true });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") silentAbort();
+  }, { capture: true });
+}
+
 export const useStore = create<FeverState>((set, get) => {
   /** 更新流式中的 assistant 消息 */
   const patchPending = (fn: (m: Message) => Message) => {
@@ -478,7 +494,11 @@ export const useStore = create<FeverState>((set, get) => {
         if (get().streaming) finalizePending();
       } catch (e) {
         if (e instanceof StreamAbortedError) {
-          patchParts((p) => [...p, { type: "text", text: "*已停止生成。*" }]);
+          // 页面隐藏/切 tab/关 preview 触发的 abort：不写"已停止生成"，让用户无感
+          const silent = document.visibilityState === "hidden";
+          if (!silent) {
+            patchParts((p) => [...p, { type: "text", text: "*已停止生成。*" }]);
+          }
           finalizePending();
         } else {
           patchParts((p) => [

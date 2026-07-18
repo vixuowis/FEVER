@@ -74,6 +74,25 @@ def _summarize_subs(results: list[dict]) -> dict:
     }
 
 
+def _collect_artifacts(results: list[dict]) -> list[dict]:
+    """从 sub-skill 结果中收集所有 artifacts 列表（artifacts 优先，单 artifact 兜底）。
+
+    composite skill 内部调子 skill 时，execute_skill 不会自动落库。
+    本函数把子结果里的 artifacts/artifact 拍平，统一挂到 composite 的返回上，
+    由 llm.run_agent 走 artifact_store 流程落库 —— 这样 LLM 调一次 composite
+    也能在前端 artifacts 面板看到所有子数据。
+    """
+    out: list[dict] = []
+    for r in results:
+        if not isinstance(r, dict) or not r.get("ok"):
+            continue
+        if r.get("artifacts"):
+            out.extend(r["artifacts"])
+        elif r.get("artifact"):
+            out.append(r["artifact"])
+    return out
+
+
 # ============================================================ evidence_graph
 # 9 个 _eg_* 的高层 dispatcher。LLM 只看到 1 个 evidence_graph skill，
 # 通过 action 参数路由到对应 sub-tool。LLM 不需要记住 9 个 sub-tool 名。
@@ -196,6 +215,7 @@ async def market_research(symbol: str, lookback_days: int = 60,
                          for (n, _), r in zip(tasks, results)],
          **summary},
         meta("market_research", len(tasks)),
+        artifacts=_collect_artifacts(results) or None,
     )
 
 
@@ -240,6 +260,7 @@ async def financial_research(symbol: str, period: str = "annual") -> dict:
                          for (n, _), r in zip(tasks, results)],
          **summary},
         meta("financial_research", len(tasks)),
+        artifacts=_collect_artifacts(results) or None,
     )
 
 
@@ -289,6 +310,7 @@ async def news_intel(symbol: str | None = None,
                          for (n, _), r in zip(tasks, results)],
          **summary},
         meta("news_intel", len(tasks)),
+        artifacts=_collect_artifacts(results) or None,
     )
 
 
@@ -327,6 +349,7 @@ async def holder_research(symbol: str) -> dict:
                          for (n, _), r in zip(tasks, results)],
          **summary},
         meta("holder_research", len(tasks)),
+        artifacts=_collect_artifacts(results) or None,
     )
 
 
@@ -363,6 +386,7 @@ async def macro_intel(topic: str | None = None) -> dict:
                          for (n, _), r in zip(tasks, results)],
          **summary},
         meta("macro_intel", len(tasks)),
+        artifacts=_collect_artifacts(results) or None,
     )
 
 
@@ -455,9 +479,14 @@ async def stock_overview(keyword: str) -> dict:
     results = await _gather_sub(tasks)
     summary = _summarize_subs(results)
     summary["composed"] = ["search_stock"] + [n for n, _ in tasks]
+    sub_arts = _collect_artifacts(results)
+    # search_stock 的 artifact 也捎上
+    if r.get("artifact"):
+        sub_arts = [r["artifact"]] + sub_arts
     return ok(
         {"keyword": keyword, "resolved_symbol": code,
          "matches": [{"name": primary.get("name") or primary.get("名称"),
                       "symbol": code}], **summary},
         meta("stock_overview", len(tasks) + 1),
+        artifacts=sub_arts or None,
     )
