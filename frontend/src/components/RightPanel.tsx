@@ -258,6 +258,18 @@ function ArtifactList() {
 
           return (
             <>
+              <GroupSection
+                label="深度研究"
+                icon={<Network size={12} className="text-brand" />}
+                count={(byKind.graph.length || 0) + (byKind.report.length || 0)}
+                defaultOpen={true}
+              >
+                {[...byKind.graph, ...byKind.report].map(renderCard)}
+                {byKind.graph.length + byKind.report.length === 0 && (
+                  <EmptyHint text="证据图与研究报告（团队模式自动产出）" />
+                )}
+              </GroupSection>
+
               {pinned.length > 0 && (
                 <GroupSection
                   label="已置顶"
@@ -299,18 +311,6 @@ function ArtifactList() {
               >
                 {byKind.evidence.map(renderCard)}
                 {byKind.evidence.length === 0 && <EmptyHint text="新闻、公告、快讯" />}
-              </GroupSection>
-
-              <GroupSection
-                label="深度研究"
-                icon={<Network size={12} className="text-brand" />}
-                count={(byKind.graph.length || 0) + (byKind.report.length || 0)}
-                defaultOpen={true}
-              >
-                {[...byKind.graph, ...byKind.report].map(renderCard)}
-                {byKind.graph.length + byKind.report.length === 0 && (
-                  <EmptyHint text="证据图与研究报告（团队模式自动产出）" />
-                )}
               </GroupSection>
             </>
           );
