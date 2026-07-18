@@ -15,6 +15,9 @@ class ChatRequest(BaseModel):
     mode: Literal["auto", "agent", "team"] = "auto"
     # mode="agent" 时指定具体 agent_id（predictor / market_analyst / event_scout 等）
     agent: Optional[str] = None
+    # mode="team" 时限制可调度的专家 Agent id 列表（前端可让用户去选）。
+    # 缺省=全部；deep_researcher 是硬规则，不会被过滤掉。
+    team_members: Optional[list[str]] = None
 
 
 class CreateCaseRequest(BaseModel):

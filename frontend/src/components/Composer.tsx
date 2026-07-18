@@ -4,14 +4,17 @@ import { cls } from "../utils";
 import { useStore } from "../store";
 import type { Mode } from "../types";
 import AgentPicker from "./AgentPicker";
+import TeamMemberPicker from "./TeamMemberPicker";
 
 /** 底部输入区：
  *  - 模式 segmented（auto/agent/team）
- *  - agent 模式时显示一个 chip 触发 Agent 选择对话框
+ *  - agent 模式时显示 chip 触发 Agent 选择对话框
+ *  - team 模式时显示 chip 触发团队成员多选对话框
  *  - 自动增高 textarea + 发送/停止 */
 export default function Composer() {
   const [text, setText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [teamPickerOpen, setTeamPickerOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const streaming = useStore((s) => s.streaming);
   const mode = useStore((s) => s.mode);
@@ -21,6 +24,8 @@ export default function Composer() {
   const agents = useStore((s) => s.agents);
   const selectedAgent = useStore((s) => s.selectedAgent);
   const setSelectedAgent = useStore((s) => s.setSelectedAgent);
+  const teamMembers = useStore((s) => s.teamMembers);
+  const setTeamMembers = useStore((s) => s.setTeamMembers);
 
   // 自动增高
   useEffect(() => {
@@ -53,10 +58,15 @@ export default function Composer() {
 
   const placeholder =
     mode === "team"
-      ? "提出一个需要多角度深挖的问题，研究团队会并行展开…"
+      ? `提出一个需要多角度深挖的问题，研究团队会按 ${teamMembers.length} 个专家调度…`
       : mode === "agent" && currentAgent
         ? `直接问「${currentAgent.name}」…`
         : "询问任何财经事件、行情、公告、宏观问题…";
+
+  // team 模式 chip 文案：0 选 = "仅深度研究"，否则 N 个专家
+  const teamChipText = teamMembers.length === 0
+    ? "仅深度研究"
+    : `${teamMembers.length} 个专家`;
 
   return (
     <div className="border-t border-edge bg-paper/90 px-4 pb-4 pt-3 backdrop-blur">
@@ -97,6 +107,18 @@ export default function Composer() {
                     style={{ background: currentAgent.avatar_color || "#7C3AED" }}
                   />
                   {currentAgent.name}
+                  <ChevronDown size={10} className="opacity-70" />
+                </button>
+              )}
+              {/* team 模式：chip 显示已选专家数 */}
+              {mode === "team" && (
+                <button
+                  onClick={() => setTeamPickerOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-jade/40 bg-jade-soft px-2 py-0.5 text-[11px] font-medium text-jade transition-all hover:bg-jade hover:text-card"
+                  title="选择团队成员"
+                >
+                  <Users size={10} />
+                  {teamChipText}
                   <ChevronDown size={10} className="opacity-70" />
                 </button>
               )}
@@ -162,6 +184,15 @@ export default function Composer() {
           setSelectedAgent(id);
           // 保留焦点：让用户继续在 textarea 输入
         }}
+      />
+
+      {/* 团队成员多选对话框（team 模式） */}
+      <TeamMemberPicker
+        open={teamPickerOpen}
+        onClose={() => setTeamPickerOpen(false)}
+        agents={dispatchableAgents}
+        selectedIds={teamMembers}
+        onChange={setTeamMembers}
       />
     </div>
   );

@@ -28,6 +28,8 @@ interface UIPrefs {
   rightTab?: RightTab;
   mode?: Mode;
   selectedAgent?: string;
+  /** team 模式时调度的专家白名单（不含 deep_researcher，硬规则） */
+  teamMembers?: string[];
 }
 
 function loadUIPrefs(): UIPrefs {
@@ -249,6 +251,9 @@ interface FeverState {
   mode: Mode;
   /** mode="agent" 时选定要直接调用的 Agent id（predictor / market_analyst / event_scout ...） */
   selectedAgent: string;
+  /** team 模式时可调度的专家白名单（不含 deep_researcher，硬规则）；
+   *  空数组 = 仅 deep_researcher 跑（"只留深度研究"）。 */
+  teamMembers: string[];
   loadingCase: boolean;
   generatingReport: boolean;
   initialized: boolean;
@@ -271,6 +276,7 @@ interface FeverState {
   setRightOpen: (v: boolean) => void;
   setMode: (m: Mode) => void;
   setSelectedAgent: (id: string) => void;
+  setTeamMembers: (ids: string[]) => void;
 
   /** 库操作：新增/更新/忽略 */
   addLogicItems: (items: LogicItem[]) => void;
@@ -446,6 +452,8 @@ export const useStore = create<FeverState>((set, get) => {
     streaming: false,
     mode: loadUIPrefs().mode ?? "auto",
     selectedAgent: loadUIPrefs().selectedAgent ?? "predictor",
+    // 默认全选（首次进站无缓存时=空数组 → 在 setSkills 拉完 agents 后再补全）
+    teamMembers: loadUIPrefs().teamMembers ?? [],
     loadingCase: false,
     generatingReport: false,
     initialized: false,
@@ -461,10 +469,21 @@ export const useStore = create<FeverState>((set, get) => {
         api.skills(),
         api.agents(),
       ]);
+      const loadedAgents = agents.status === "fulfilled" ? agents.value : [];
+      // 首次加载：把 teamMembers 默认填成"全部可调度专家"
+      // 内部调度辅助（router / planner / synthesizer / verifier / report_writer）不参与
+      const teamableIds = loadedAgents
+        .filter((a) => !["router", "planner", "synthesizer", "verifier", "report_writer"].includes(a.id))
+        .map((a) => a.id);
+      const persisted = get().teamMembers;
+      const teamMembers = persisted.length > 0
+        ? persisted
+        : teamableIds;
       set({
         cases: cases.status === "fulfilled" ? sortCases(cases.value) : [],
         skills: skills.status === "fulfilled" ? skills.value : [],
-        agents: agents.status === "fulfilled" ? agents.value : [],
+        agents: loadedAgents,
+        teamMembers,
       });
     },
 
@@ -520,7 +539,9 @@ export const useStore = create<FeverState>((set, get) => {
       currentCtx = { caseId, messageId: asstMsg.id, question: content };
       try {
         await streamChat(
-          { case_id: caseId, message: content, mode: useMode, agent: useAgent },
+          { case_id: caseId, message: content, mode: useMode,
+            agent: useAgent,
+            team_members: useMode === "team" ? get().teamMembers : undefined },
           { onEvent: handleEvent, signal: abortCtl.signal },
         );
         // 流正常结束但未收到 done/error 时兜底收尾
@@ -674,27 +695,40 @@ export const useStore = create<FeverState>((set, get) => {
     selectArtifact: (id) => {
       set({ selectedArtifactId: id, rightTab: "artifacts", rightOpen: true });
       const s = get();
-      saveUIPrefs({ rightTab: "artifacts", rightOpen: true, mode: s.mode, selectedAgent: s.selectedAgent });
+      saveUIPrefs({ rightTab: "artifacts", rightOpen: true, mode: s.mode,
+                    selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
     },
+
+    /** 通用持久化：传入要修改的字段，回填其它字段当前值后整体保存 */
     setRightTab: (t) => {
       set({ rightTab: t, rightOpen: true });
       const s = get();
-      saveUIPrefs({ rightTab: t, rightOpen: true, mode: s.mode, selectedAgent: s.selectedAgent });
+      saveUIPrefs({ rightTab: t, rightOpen: true, mode: s.mode,
+                    selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
     },
     setRightOpen: (v) => {
       set({ rightOpen: v });
       const s = get();
-      saveUIPrefs({ rightTab: s.rightTab, rightOpen: v, mode: s.mode, selectedAgent: s.selectedAgent });
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: v, mode: s.mode,
+                    selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
     },
     setMode: (m) => {
       set({ mode: m });
       const s = get();
-      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: m, selectedAgent: s.selectedAgent });
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: m,
+                    selectedAgent: s.selectedAgent, teamMembers: s.teamMembers });
     },
     setSelectedAgent: (id) => {
       set({ selectedAgent: id });
       const s = get();
-      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: s.mode, selectedAgent: id });
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: s.mode,
+                    selectedAgent: id, teamMembers: s.teamMembers });
+    },
+    setTeamMembers: (ids) => {
+      set({ teamMembers: ids });
+      const s = get();
+      saveUIPrefs({ rightTab: s.rightTab, rightOpen: s.rightOpen, mode: s.mode,
+                    selectedAgent: s.selectedAgent, teamMembers: ids });
     },
 
     /* ---------------- research logic library ---------------- */

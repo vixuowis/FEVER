@@ -187,8 +187,13 @@ async def run_team(
     history: list[dict],
     state: dict,
     artifact_store: ArtifactStore,
+    team_members: list[str] | None = None,
 ) -> AsyncIterator[dict]:
-    """Yield SSE events for the whole team-mode flow. state['content'] = final answer."""
+    """Yield SSE events for the whole team-mode flow. state['content'] = final answer.
+
+    team_members: 前端可选的专家白名单（仅 EXPERT_IDS 内的子集生效）。
+                  None / 空 = 全部可调度。deep_researcher 是硬规则（不剔除）。
+    """
     # ------------------------------------------------------------ 1) plan --
     plan: list[dict] = []
     try:
@@ -213,6 +218,22 @@ async def run_team(
              f"把 market_analyst / fundamentals_analyst 的发现沉淀到证据图：每条关键数字作为 evidence，"
              f"每条可证伪推断作为 claim，标 supports/contradicts 关系，最后 export 证据图"},
         ]
+    # 应用 team_members 白名单：
+    # 1) 剔除未勾选的专家（deep_researcher 永不被剔除，硬规则）
+    # 2) 若剔除后没有任何 deep_researcher 之外的任务则保留 deep_researcher 单跑
+    # 3) 若剔除后 plan 为空，退化为仅 deep_researcher
+    if team_members is not None:
+        allow = set(team_members) | {"deep_researcher"}
+        before = [p["agent"] for p in plan]
+        plan = [p for p in plan if p["agent"] in allow]
+        removed = set(before) - set(p["agent"] for p in plan)
+        if removed:
+            yield {"type": "agent_step", "phase": "plan_filter",
+                   "note": f"已按 team_members 筛选：剔除 {sorted(removed)}（剩余 {len(plan)} 个子任务）"}
+        if not plan:
+            plan = [{"agent": "deep_researcher", "task":
+                     f"围绕「{question}」直接沉淀到证据图：每条关键数字作为 evidence，"
+                     f"每条可证伪推断作为 claim，最后 export"}]
     plan = plan[:4]
     plan_public = [{**p, "agent_name": AGENTS[p["agent"]]["name"]} for p in plan]
     yield {"type": "agent_step", "phase": "plan", "note": f"拆解为 {len(plan)} 个子任务",

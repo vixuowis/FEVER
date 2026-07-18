@@ -62,12 +62,14 @@ async def _chat_stream(req: ChatRequest) -> AsyncIterator[str]:
             db.add_artifact, case_id, message_id, kind, title, payload
         )
 
-    yield sse({"type": "meta", "case_id": case_id, "mode": req.mode, "agent": req.agent})
+    yield sse({"type": "meta", "case_id": case_id, "mode": req.mode, "agent": req.agent,
+               "team_members": req.team_members})
     try:
         if req.mode == "team":
             # team 模式：history 传给 synthesize；问题原文作为规划输入
             hist_for_team = history[:-1] if history else []  # 排除当前 user 消息
-            async for ev in run_team(req.message, hist_for_team, state, artifact_store):
+            async for ev in run_team(req.message, hist_for_team, state, artifact_store,
+                                     team_members=req.team_members):
                 yield sse(ev)
         else:
             # mode == "agent" | "auto"：单 Agent 工具循环
