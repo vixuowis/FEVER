@@ -8,7 +8,6 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
-import { api } from "../api";
 import { useStore } from "../store";
 import type { Mode } from "../types";
 import Composer from "./Composer";
@@ -21,35 +20,128 @@ type Suggestion = {
   icon_hint: "newspaper" | "sparkles" | "trending" | "landmark" | "candlestick" | "users";
   desc: string;
   query?: string;
+  /** mode="agent" 时指定调度的具体专家 */
+  agent?: string;
 };
 
-// 兜底建议：API 失败时用这组
-const FALLBACK_SUGGESTIONS: Suggestion[] = [
+/* ---------- 静态推荐池：每池 ≥4 条，「换一批」时随机抽 2 条/池，凑成 6 条 ---------- */
+
+const POOL_AUTO: Suggestion[] = [
   {
-    text: "分析贵州茅台近一个月的事件与股价表现",
-    mode: "auto",
-    icon_hint: "candlestick",
-    desc: "新闻 + K线 + 事件研究",
-  },
-  {
-    text: "最近有什么值得关注的财经事件？",
+    text: "看下今天的财经快讯",
     mode: "auto",
     icon_hint: "newspaper",
-    desc: "全局快讯筛选高影响事件",
+    desc: "全网快讯筛高影响事件",
+    query: "看下今天的重要财经快讯，筛出 3 条对市场影响最大的",
   },
   {
-    text: "对宁德时代做深度研究",
-    mode: "team",
-    icon_hint: "users",
-    desc: "研究团队多专家并行",
+    text: "分析 A 股今日整体行情",
+    mode: "auto",
+    icon_hint: "candlestick",
+    desc: "指数 + 板块 + 龙虎榜",
+    query: "分析今天 A 股整体行情：主要指数、领涨/领跌板块、龙虎榜异动",
   },
   {
-    text: "央行国债收益率最近怎么走？",
+    text: "看下最新宏观指标",
     mode: "auto",
     icon_hint: "landmark",
-    desc: "宏观指标曲线",
+    desc: "CPI / PMI / M2 / 国债",
+    query: "看下最近发布的宏观指标（CPI / PMI / M2 / 10 年期国债收益率）",
+  },
+  {
+    text: "看最近的行业资金流向",
+    mode: "auto",
+    icon_hint: "trending",
+    desc: "行业资金净流入 + 板块异动",
+    query: "看最近的行业资金净流入和板块异动，筛 3 个最值得关注的",
   },
 ];
+
+const POOL_AGENT: Suggestion[] = [
+  {
+    text: "用事件猎手扫高影响事件",
+    mode: "agent",
+    agent: "event_scout",
+    icon_hint: "sparkles",
+    desc: "事件猎手 · 新闻 + 公告 + 异动",
+    query: "扫描最近 24 小时的财经新闻和公告，筛出 5 条对市场影响最大的事件",
+  },
+  {
+    text: "用行情分析师看比亚迪 K 线",
+    mode: "agent",
+    agent: "market_analyst",
+    icon_hint: "candlestick",
+    desc: "行情分析师 · K线 + 板块 + 龙虎榜",
+    query: "分析 002594 比亚迪近 60 个交易日的 K 线走势、技术指标、量价关系",
+  },
+  {
+    text: "用基本面分析师看宁德时代",
+    mode: "agent",
+    agent: "fundamentals_analyst",
+    icon_hint: "landmark",
+    desc: "基本面分析师 · 财务摘要 + 研报",
+    query: "用财务摘要 + 研报评级，分析 300750 宁德时代近三年的财务健康度和机构观点",
+  },
+  {
+    text: "用预测员推演茅台后市",
+    mode: "agent",
+    agent: "predictor",
+    icon_hint: "trending",
+    desc: "预测员 · 3 档情景 + 概率 + 催化",
+    query: "用世界模型推演 600519 贵州茅台后市的 3 种情景（乐观/中性/悲观）以及概率和关键催化",
+  },
+];
+
+const POOL_TEAM: Suggestion[] = [
+  {
+    text: "团队研究：分析军工板块异动",
+    mode: "team",
+    icon_hint: "users",
+    desc: "研究团队 · 多专家并行 + 复核",
+    query: "今天军工板块异动原因分析：涉及个股、产业链传导、是否可持续（团队模式）",
+  },
+  {
+    text: "团队研究：对英伟达做深度研究",
+    mode: "team",
+    icon_hint: "users",
+    desc: "研究团队 · 证据图谱沉淀",
+    query: "对 NVDA 英伟达做深度研究：近期财报、AI 需求、竞争格局、估值（团队模式）",
+  },
+  {
+    text: "团队研究：地产政策对银行股影响",
+    mode: "team",
+    icon_hint: "users",
+    desc: "研究团队 · 多角度交叉验证",
+    query: "近期地产政策对银行股的影响路径、受益板块、风险点（团队模式）",
+  },
+  {
+    text: "团队研究：黄金价格后市跟踪",
+    mode: "team",
+    icon_hint: "users",
+    desc: "研究团队 · 宏观 + 资金 + 行情",
+    query: "跟踪近期黄金价格走势：美元/利率/地缘因素如何影响？后市如何看？（团队模式）",
+  },
+];
+
+/** Fisher-Yates 洗牌，返回新数组 */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/** 从池中随机抽 2 条 */
+function pickTwo<T>(arr: T[]): T[] {
+  return shuffle(arr).slice(0, 2);
+}
+
+/** 6 条推荐：2 快速 + 2 专家 + 2 团队（顺序固定，分组清晰） */
+function pickSix(): Suggestion[] {
+  return [...pickTwo(POOL_AUTO), ...pickTwo(POOL_AGENT), ...pickTwo(POOL_TEAM)];
+}
 
 const ICON_BY_HINT: Record<string, React.ReactNode> = {
   newspaper: <Newspaper size={16} />,
@@ -95,44 +187,6 @@ const CHIP_PROMPTS: Record<string, () => string> = {
   "研报评级": () => { const s = pickStock(); return `查 ${s.code}（${s.name}）的最新研报评级`; },
 };
 
-const HOT_CACHE_KEY = "fever.hot_topics.v1";
-const HOT_TTL_MS = 10 * 60 * 1000; // 10 分钟
-
-function isValidSuggestion(x: unknown): x is Suggestion {
-  if (!x || typeof x !== "object") return false;
-  const o = x as Record<string, unknown>;
-  // 老结构（icon 是 React element）一律视为脏数据，避免历史 localStorage 把页面渲染挂掉
-  if ("icon" in o && o.icon !== undefined) return false;
-  // 必须有 icon_hint 字符串
-  return typeof o.icon_hint === "string" && typeof o.text === "string";
-}
-
-function loadCachedTopics(): { items: Suggestion[]; ts: number } | null {
-  try {
-    const raw = localStorage.getItem(HOT_CACHE_KEY);
-    if (!raw) return null;
-    const j = JSON.parse(raw) as { items?: unknown[]; ts?: number };
-    if (!j?.ts || Date.now() - j.ts > HOT_TTL_MS) return null;
-    const items = Array.isArray(j.items) ? j.items.filter(isValidSuggestion) : [];
-    if (items.length === 0) {
-      // 全是脏数据 → 直接清掉，避免再次触发
-      try { localStorage.removeItem(HOT_CACHE_KEY); } catch { /* ignore */ }
-      return null;
-    }
-    return { items: items as Suggestion[], ts: j.ts };
-  } catch {
-    return null;
-  }
-}
-
-function saveCachedTopics(items: Suggestion[]) {
-  try {
-    localStorage.setItem(HOT_CACHE_KEY, JSON.stringify({ items, ts: Date.now() }));
-  } catch {
-    /* ignore quota errors */
-  }
-}
-
 /** 空态 hero */
 function Hero() {
   const sendMessage = useStore((s) => s.sendMessage);
@@ -140,62 +194,17 @@ function Hero() {
   const streaming = useStore((s) => s.streaming);
   const setPromptSeed = useStore((s) => s.setPromptSeed);
 
-  // 初始建议：优先 localStorage 缓存；空时用兜底
-  const [suggestions, setSuggestions] = useState<Suggestion[]>(() => {
-    const cached = loadCachedTopics();
-    if (cached?.items?.length) return cached.items;
-    return FALLBACK_SUGGESTIONS;
-  });
+  // 6 条推荐（2 快速 + 2 专家 + 2 团队），纯静态池里随机抽
+  const [suggestions, setSuggestions] = useState<Suggestion[]>(pickSix);
+  // 每次点击换一批时切换的「翻页标记」，仅用于触发图标旋转动画
   const [refreshing, setRefreshing] = useState(false);
 
-  // 首次挂载：拉一次新鲜数据
-  useEffect(() => {
-    let aborted = false;
-    api
-      .hotTopics(false)
-      .then((r) => {
-        if (aborted) return;
-        if (r?.items?.length) {
-          const mapped: Suggestion[] = r.items.map((it) => ({
-            text: it.title,
-            desc: it.desc,
-            mode: it.mode,
-            icon_hint: it.icon_hint,
-            query: it.query,
-          }));
-          setSuggestions(mapped);
-          saveCachedTopics(mapped);
-        }
-      })
-      .catch(() => {
-        /* 静默兜底 */
-      });
-    return () => {
-      aborted = true;
-    };
-  }, []);
-
-  const refresh = async () => {
+  const refresh = () => {
     if (refreshing) return;
     setRefreshing(true);
-    try {
-      const r = await api.hotTopics(true);
-      if (r?.items?.length) {
-        const mapped: Suggestion[] = r.items.map((it) => ({
-          text: it.title,
-          desc: it.desc,
-          mode: it.mode,
-          icon_hint: it.icon_hint,
-          query: it.query,
-        }));
-        setSuggestions(mapped);
-        saveCachedTopics(mapped);
-      }
-    } catch {
-      /* 静默 */
-    } finally {
-      setRefreshing(false);
-    }
+    setSuggestions(pickSix());
+    // 让旋转动画跑完一圈后复位
+    window.setTimeout(() => setRefreshing(false), 600);
   };
 
   return (
@@ -222,7 +231,7 @@ function Hero() {
               disabled={streaming}
               onClick={() => {
                 setMode(s.mode);
-                void sendMessage(s.query ?? s.text, s.mode);
+                void sendMessage(s.query ?? s.text, s.mode, s.agent);
               }}
               className="group flex items-start gap-3 rounded-card border border-edge bg-card px-4 py-3.5 text-left shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-pop disabled:opacity-50"
             >
