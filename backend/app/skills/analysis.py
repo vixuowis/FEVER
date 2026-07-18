@@ -1,0 +1,165 @@
+"""Analysis skills: event_study — 事件研究法 (design.md §5).
+
+取事件日前后 [-pre, +post] 交易日的个股日K与指数日K（向前多取缓冲保证窗口），
+计算日收益 r_stock / r_index，AR_t = r_stock - r_index，CAR_t = ΣAR（自 -pre 起累计）。
+所有收益类字段单位：%（百分比）。
+"""
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+from typing import Optional
+
+import akshare as ak
+import pandas as pd
+
+from .market import _clean_ohlcv, norm_date, norm_index_symbol, norm_symbol
+from .registry import err, meta, ok, skill
+
+
+def _fetch_stock_close(sym: str, start8: str, end8: str) -> tuple[pd.DataFrame, str]:
+    try:
+        df = ak.stock_zh_a_daily(symbol=sym, start_date=start8, end_date=end8, adjust="qfq")
+        if df is None or len(df) == 0:
+            raise ValueError("sina 日K为空")
+        src = "akshare.stock_zh_a_daily"
+    except Exception as e1:  # noqa: BLE001
+        try:
+            df = ak.stock_zh_a_hist_tx(symbol=sym, start_date=start8, end_date=end8, adjust="qfq")
+            src = "akshare.stock_zh_a_hist_tx"
+        except Exception as e2:  # noqa: BLE001
+            raise ValueError(
+                f"{sym} 行情获取失败（可能代码不存在）: sina({type(e1).__name__}), tx({type(e2).__name__})"
+            )
+    if df is None or len(df) == 0:
+        raise ValueError(f"{sym} 在 {start8}~{end8} 无行情数据（可能代码不存在）")
+    df, _ = _clean_ohlcv(df, limit=100000)
+    return df[["date", "close"]], src
+
+
+@skill(
+    "event_study",
+    "事件研究法：以事件日为 T0，计算窗口 [-pre,+post] 内个股相对指数的超额收益 AR 与累计超额收益 CAR，"
+    "并给出事件日前5日/后5日累计收益、CAR终值、事件日涨跌幅。收益单位%。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "股票代码，如 600519 / sh600519"},
+            "event_date": {"type": "string", "description": "事件日 YYYYMMDD 或 YYYY-MM-DD"},
+            "pre": {"type": "integer", "description": "事件前交易日数，默认20"},
+            "post": {"type": "integer", "description": "事件后交易日数，默认20"},
+            "index_symbol": {"type": "string", "description": "基准指数，默认 sh000300(沪深300)"},
+        },
+        "required": ["symbol", "event_date"],
+    },
+)
+def event_study(symbol: str, event_date: str, pre: int = 20, post: int = 20,
+                index_symbol: str = "sh000300") -> dict:
+    try:
+        sym = norm_symbol(symbol)
+        idx_sym = norm_index_symbol(index_symbol or "sh000300")
+        pre = max(1, min(int(pre or 20), 60))
+        post = max(0, min(int(post or 20), 60))
+        try:
+            ev = datetime.strptime(norm_date(event_date), "%Y%m%d").date()
+        except ValueError:
+            return err(f"无法识别事件日: {event_date}")
+        today = date.today()
+        # 向前多取 60 天缓冲保证 pre 窗口；向后取到 min(今天, 事件+缓冲)
+        start8 = (ev - timedelta(days=pre * 2 + 60)).strftime("%Y%m%d")
+        end8 = min(today, ev + timedelta(days=post * 2 + 15)).strftime("%Y%m%d")
+
+        stock_df, src_stock = _fetch_stock_close(sym, start8, end8)
+        if len(stock_df) == 0:
+            return err(f"{sym} 在 {start8}~{end8} 无行情数据")
+        try:
+            idx_raw = ak.stock_zh_index_daily(symbol=idx_sym)
+        except Exception as e:  # noqa: BLE001
+            return err(f"基准指数 {idx_sym} 获取失败: {type(e).__name__}: {e}")
+        if idx_raw is None or len(idx_raw) == 0:
+            return err(f"基准指数 {idx_sym} 无数据")
+        idx_df, _ = _clean_ohlcv(idx_raw, limit=100000)
+        idx_df = idx_df[["date", "close"]].rename(columns={"close": "idx_close"})
+        idx_df = idx_df[(idx_df["date"] >= f"{start8[:4]}-{start8[4:6]}-{start8[6:]}")]
+
+        df = pd.merge(stock_df, idx_df, on="date", how="inner").sort_values("date").reset_index(drop=True)
+        if len(df) < pre + 3:
+            return err(f"对齐后交易日不足（{len(df)} 天），无法构造 [-{pre},+{post}] 窗口")
+        df["r_stock"] = df["close"].pct_change() * 100.0
+        df["r_index"] = df["idx_close"].pct_change() * 100.0
+
+        ev_iso = ev.isoformat()
+        ge = df.index[df["date"] >= ev_iso].tolist()
+        if not ge:
+            return err(f"事件日 {ev_iso} 之后无交易日数据")
+        t0 = ge[0]
+        actual_event_day = df.loc[t0, "date"]
+        i_start = t0 - pre
+        if i_start < 1:  # 需要 i_start-1 计算首日收益
+            return err(f"事件日前可用交易日不足 {pre} 天（仅 {t0} 天）")
+        i_end = min(t0 + post, len(df) - 1)
+        win = df.loc[i_start:i_end].copy()
+        win["ar"] = win["r_stock"] - win["r_index"]
+        win["car"] = win["ar"].cumsum()
+        win["t"] = range(-pre, -pre + len(win))
+
+        def _cum_ret(days: pd.Series) -> Optional[float]:
+            days = days.dropna()
+            if len(days) == 0:
+                return None
+            return round(float(((1 + days / 100.0).prod() - 1) * 100.0), 4)
+
+        rows = []
+        for _, r in win.iterrows():
+            rows.append({
+                "t": int(r["t"]),
+                "date": r["date"],
+                "close": round(float(r["close"]), 3),
+                "r_stock": None if pd.isna(r["r_stock"]) else round(float(r["r_stock"]), 4),
+                "r_index": None if pd.isna(r["r_index"]) else round(float(r["r_index"]), 4),
+                "ar": None if pd.isna(r["ar"]) else round(float(r["ar"]), 4),
+                "car": None if pd.isna(r["car"]) else round(float(r["car"]), 4),
+            })
+        day0_rows = df.loc[t0]
+        summary = {
+            "symbol": sym,
+            "index_symbol": idx_sym,
+            "event_date_requested": ev_iso,
+            "event_day": actual_event_day,
+            "event_day_is_trading_day": actual_event_day == ev_iso,
+            "window": f"[-{pre}, +{i_end - t0}] 交易日",
+            "event_day_change_pct": (None if pd.isna(day0_rows["r_stock"])
+                                     else round(float(day0_rows["r_stock"]), 4)),
+            "pre5_cum_return_pct": _cum_ret(df.loc[max(t0 - 5, i_start):t0 - 1, "r_stock"])
+            if t0 - 1 >= i_start else None,
+            "post5_cum_return_pct": _cum_ret(df.loc[t0 + 1:min(t0 + 5, i_end), "r_stock"]),
+            "car_final_pct": rows[-1]["car"] if rows else None,
+            "note": "r_stock/r_index/ar/car 单位均为 %；CAR 自窗口首日累计",
+        }
+        line = {
+            "kind": "line",
+            "title": f"{sym.upper()} 事件研究 CAR 曲线（T0={actual_event_day}）",
+            "payload": {
+                "x": [str(r["t"]) for r in rows],
+                "series": [{"name": "CAR(%)", "data": [r["car"] for r in rows]},
+                           {"name": "AR(%)", "data": [r["ar"] for r in rows]}],
+                "yname": "%",
+                "event_date": actual_event_day,
+            },
+        }
+        table = {
+            "kind": "table",
+            "title": f"事件窗口明细（{actual_event_day} 前后 {pre}/{i_end - t0} 日）",
+            "payload": {
+                "columns": ["t", "date", "close", "r_stock", "r_index", "ar", "car"],
+                "rows": [[r[c] for c in ("t", "date", "close", "r_stock", "r_index", "ar", "car")]
+                         for r in rows],
+                "note": "收益单位 %；t=0 为事件日",
+            },
+        }
+        return ok(
+            {"summary": summary, "window": rows},
+            meta(f"{src_stock} + akshare.stock_zh_index_daily", len(rows)),
+            artifacts=[line, table],
+        )
+    except Exception as e:  # noqa: BLE001
+        return err(f"事件研究失败: {type(e).__name__}: {e}")

@@ -1,27 +1,20 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import Layout from './components/Layout';
-import Home from './pages/Home';
-import GraphAnalysis from './pages/GraphAnalysis';
-import Simulation from './pages/Simulation';
-import Timeline from './pages/Timeline';
-import EventDetail from './pages/EventDetail';
-import EvidenceGraph from './pages/EvidenceGraph';
+import { useEffect } from "react";
+import Sidebar from "./components/Sidebar";
+import ChatPanel from "./components/ChatPanel";
+import RightPanel from "./components/RightPanel";
+import { useStore } from "./store";
 
-function App() {
+export default function App() {
+  const init = useStore((s) => s.init);
+  useEffect(() => {
+    void init();
+  }, [init]);
+
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Home />} />
-          <Route path="event/:eventId" element={<EventDetail />} />
-          <Route path="graph" element={<GraphAnalysis />} />
-          <Route path="simulation" element={<Simulation />} />
-          <Route path="timeline" element={<Timeline />} />
-          <Route path="evidence" element={<EvidenceGraph />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <div className="flex h-screen w-full overflow-hidden bg-paper font-sans text-ink antialiased">
+      <Sidebar />
+      <ChatPanel />
+      <RightPanel />
+    </div>
   );
 }
-
-export default App;

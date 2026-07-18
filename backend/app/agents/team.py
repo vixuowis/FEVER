@@ -1,0 +1,264 @@
+"""team 模式编排 (design.md §6.3): plan → fan-out(串行) → synthesize → verify → extract.
+
+修订: 改为串行执行 experts，避免并发 reasoning_content 交错污染前端。
+新增: 5) extract —— 从最终结论中抽取「待验证推演」作为研究逻辑库条目。
+"""
+from __future__ import annotations
+
+from typing import Any, AsyncIterator
+
+from .. import config
+from ..llm import ArtifactStore, complete_json, run_agent
+from .roster import AGENTS, get_agent, system_prompt
+
+EXPERT_IDS = ["event_scout", "market_analyst", "fundamentals_analyst"]
+
+PLANNER_INSTRUCTION = """你是任务规划器。把用户问题拆成 2~4 个子任务，每个子任务指定一个专家 Agent：
+- event_scout（事件猎手：新闻/公告/快讯检索，筛高影响事件）
+- market_analyst（行情分析师：K线/指数/板块/龙虎榜/融资融券/事件研究）
+- fundamentals_analyst（基本面分析师：财务摘要/财务指标/研报评级/宏观）
+严格输出 JSON：{"tasks": [{"agent": "<id>", "task": "<具体子问题，含标的与时间范围>"}]}
+同一个专家最多出现一次；任务之间尽量不重叠。"""
+
+HYPOTHESIS_EXTRACT_INSTRUCTION = """你是「研究逻辑提炼员」。从下面的研究结论中抽取**待市场验证的推演/假设/情景/条件预测**（不是已经成立的事实）。
+
+每条是一个可证伪的论断，例如：
+- "情景A：军工板块脉冲式反弹（概率60%）"
+- "若央行 7 月降息 10bp，则地产/银行股短期跑赢大盘"
+- "如果 Q3 业绩同比 < 0%，则估值切换压制股价"
+
+严格输出 JSON：{"items": [
+  {
+    "hypothesis": "（一句话陈述，可证伪）",
+    "category": "情景 | 条件预测 | 时间窗口 | 反方观点 | 量化阈值",
+    "probability": "可选，如 60% / 0.6 / 中等概率；无则空串",
+    "scope": "涉及的标的/板块/指数，如 '军工板块' '600519' '沪深300'",
+    "horizon": "验证时间窗口，如 '未来 5 个交易日' '2026Q3 财报' '1 个月内'",
+    "check": "（一句话说明如何用市场数据验证，例如「观察 5 个交易日内板块累计涨跌幅 > 0%」「财报发布后 EPS 是否 > 0.5 元」）"
+  }
+]}
+
+- 最多 5 条
+- 若结论中没有可证伪的推演/假设/情景，返回 {"items": []}
+- 不要把已发生的事实或数据陈述（如「今日银行涨 1.2%」）当成 hypothesis
+- 严格只输出 JSON，不要其他内容。"""
+
+
+def _evidence_digest(tool_trace: list[dict], max_chars: int = 3000) -> str:
+    lines = []
+    for t in tool_trace:
+        if t.get("type") != "tool":
+            continue
+        args = ",".join(f"{k}={v}" for k, v in (t.get("args") or {}).items())
+        status = "OK" if t.get("ok") else "FAIL"
+        lines.append(f"[{t.get('agent')}] {t.get('skill')}({args}) [{status}] {t.get('preview')}")
+    text = "\n".join(lines)
+    return text[:max_chars]
+
+
+def _short_summary(text: str, max_chars: int = 120) -> str:
+    """从 expert findings 中提取一句简短总结：取首段（首个 \\n\\n 之前），
+    过长则按句号/换行截到 max_chars 之前，避免 agent_done 出现长 markdown。"""
+    if not text:
+        return ""
+    first = text.split("\n\n", 1)[0].strip()
+    # 去掉行内换行（让单段更紧凑）
+    first = " ".join(first.splitlines()).strip()
+    if len(first) <= max_chars:
+        return first
+    truncated = first[:max_chars]
+    for sep in ["。", "？", "！", ".", "?", "!", ";", "；", "\n"]:
+        idx = truncated.rfind(sep)
+        if idx > max_chars // 2:
+            return truncated[: idx + 1].strip() + ("…" if sep not in "。？！.?!；" else "")
+    return truncated.rstrip() + "…"
+
+
+async def _run_expert_serial(
+    agent_id: str,
+    task_text: str,
+    question: str,
+    artifact_store: ArtifactStore,
+) -> AsyncIterator[dict]:
+    """单 expert 串行执行：agent_start → events → agent_done 收尾。失败也收尾。"""
+    yield {"type": "agent_step", "phase": "agent_start", "agent": agent_id, "note": task_text}
+    expert_state: dict[str, Any] = {"content": "", "tool_trace": [], "rounds": 0}
+    try:
+        messages = [
+            {"role": "system", "content": system_prompt(agent_id)},
+            {"role": "user", "content":
+                f"【用户原始问题】{question}\n\n【你的子任务】{task_text}\n\n"
+                "请调用你的技能获取真实数据后作答；最后用不超过600字总结发现（含关键数字+来源）。"},
+        ]
+        async for ev in run_agent(agent_id, messages, agent_def=get_agent(agent_id),
+                                  state=expert_state, artifact_store=artifact_store,
+                                  max_rounds=config.TEAM_MAX_ROUNDS):
+            yield ev
+        findings = expert_state["content"].strip()
+        yield {"type": "agent_step", "phase": "agent_done", "agent": agent_id,
+               "note": _short_summary(findings)}
+        yield {"type": "agent_findings", "agent": agent_id, "findings": findings[:600],
+               "tool_trace": expert_state["tool_trace"]}
+    except Exception as e:  # noqa: BLE001
+        findings = f"（{agent_id} 执行失败: {type(e).__name__}: {e}）"
+        yield {"type": "agent_step", "phase": "agent_done", "agent": agent_id,
+               "note": "执行失败"}
+        yield {"type": "agent_findings", "agent": agent_id, "findings": findings,
+               "tool_trace": expert_state["tool_trace"], "error": str(e)}
+
+
+async def run_team(
+    question: str,
+    history: list[dict],
+    state: dict,
+    artifact_store: ArtifactStore,
+) -> AsyncIterator[dict]:
+    """Yield SSE events for the whole team-mode flow. state['content'] = final answer."""
+    # ------------------------------------------------------------ 1) plan --
+    plan: list[dict] = []
+    try:
+        plan_json = await complete_json(
+            system_prompt("router") + "\n\n" + PLANNER_INSTRUCTION,
+            f"用户问题：{question}",
+            max_tokens=2000,
+        )
+        if plan_json:
+            for t in plan_json.get("tasks", []):
+                aid = str(t.get("agent", "")).strip()
+                task_text = str(t.get("task", "")).strip()
+                if aid in EXPERT_IDS and task_text and all(p["agent"] != aid for p in plan):
+                    plan.append({"agent": aid, "task": task_text})
+    except Exception:  # noqa: BLE001
+        plan = []
+    if not plan:  # fallback：行情+基本面双视角
+        plan = [
+            {"agent": "market_analyst", "task": f"围绕「{question}」分析行情、资金与关键事件的价格反应"},
+            {"agent": "fundamentals_analyst", "task": f"围绕「{question}」分析基本面、财务与机构观点"},
+        ]
+    plan = plan[:4]
+    plan_public = [{**p, "agent_name": AGENTS[p["agent"]]["name"]} for p in plan]
+    yield {"type": "agent_step", "phase": "plan", "note": f"拆解为 {len(plan)} 个子任务",
+           "plan": plan_public}
+    state["tool_trace"].append({"type": "plan", "plan": plan_public})
+
+    # -------------------------------------------------------- 2) serial fan
+    findings: dict[str, str] = {}
+    for p in plan:
+        async for ev in _run_expert_serial(p["agent"], p["task"], question, artifact_store):
+            # 提取 agent_findings 写入 state + findings；其余原样 yield
+            if ev.get("type") == "agent_findings":
+                aid = ev["agent"]
+                findings[aid] = ev.get("findings", "")
+                if ev.get("tool_trace"):
+                    state["tool_trace"].extend(ev["tool_trace"])
+                # 不把 agent_findings 推给前端（前端用 agent_step agent_done 已经知道）
+                continue
+            yield ev
+
+    # ---------------------------------------------------------- 3) synthesize
+    digest = "\n\n".join(
+        f"【{AGENTS[aid]['name']}({aid}) 发现】\n{txt or '（无有效产出）'}"
+        for aid, txt in findings.items()
+    )
+    synth_messages = [{"role": "system", "content": system_prompt("router")}]
+    synth_messages.extend(history)
+    synth_messages.append({
+        "role": "user",
+        "content": (
+            f"【用户问题】{question}\n\n"
+            f"【专家团队发现】\n{digest}\n\n"
+            "请综合以上专家发现，给出结构化的最终回答（先结论后依据，标注来源与推断；"
+            "如关键数据缺失可再调工具补充，但不要重复专家已查过的数据）。"
+        ),
+    })
+    async for ev in run_agent("router", synth_messages, agent_def=get_agent("router"),
+                              state=state, artifact_store=artifact_store,
+                              max_rounds=3):
+        yield ev
+
+    # ------------------------------------------------------------- 4) verify
+    draft = state["content"].strip()
+    if draft:
+        try:
+            evidence = _evidence_digest(state["tool_trace"])
+            verdict_json = await complete_json(
+                system_prompt("verifier"),
+                f"【分析草稿】\n{draft[:4000]}\n\n【证据摘要（工具调用记录）】\n{evidence}",
+                max_tokens=3000,
+            )
+        except Exception:  # noqa: BLE001
+            verdict_json = None
+        verdict = "pass"
+        issues: list[str] = []
+        corrected = ""
+        if verdict_json:
+            verdict = str(verdict_json.get("verdict") or "pass")
+            issues = [str(i) for i in (verdict_json.get("issues") or [])][:5]
+            corrected = str(verdict_json.get("corrected") or "")
+        note = "；".join(issues)[:300] if issues else "未发现事实性错误"
+        yield {"type": "agent_step", "phase": "verified", "agent": "verifier",
+               "note": f"verdict={verdict} · {note}"}
+        state["tool_trace"].append({"type": "verify", "verdict": verdict,
+                                    "issues": issues, "corrected": corrected[:1000]})
+        if issues:
+            fix_messages = [
+                {"role": "system", "content": system_prompt("router")},
+                {"role": "user", "content": (
+                    f"【你的草稿】\n{draft[:3000]}\n\n"
+                    f"【复核员意见】\n问题：{note}\n修正建议：{corrected[:1500]}\n\n"
+                    "请直接输出修正后的关键内容（先一句话承认并更正问题，再给出修正后的关键段落）。"
+                    "不要重复外层已注入的「## 复核修正」标题；开头不要以 # 标题开头，"
+                    "直接以陈述句或「经核实…」之类的过渡句起笔即可。")},
+            ]
+            fix_state: dict[str, Any] = {"content": "", "tool_trace": state["tool_trace"]}
+            header = "\n\n## 复核修正\n"
+            state["content"] += header
+            yield {"type": "token", "agent": "router", "delta": header}
+            async for ev in run_agent("router", fix_messages,
+                                      agent_def={**get_agent("router"), "skills": []},
+                                      state=fix_state, artifact_store=artifact_store,
+                                      max_rounds=1, emit_thinking=False):
+                if ev.get("type") == "token":
+                    delta = ev["delta"]
+                    # 兜底：若 LLM 仍以 ## 复核修正 开头，剥掉首个重复标题
+                    if not fix_state["content"] and delta.lstrip().startswith("#"):
+                        lines = delta.lstrip().split("\n", 1)
+                        first = lines[0].strip().lower()
+                        if "复核修正" in first or first.startswith("#"):
+                            delta = lines[1] if len(lines) > 1 else ""
+                            if delta:
+                                delta = "\n" + delta
+                    state["content"] += delta
+                yield ev
+
+    # -------------------------------------------------- 5) extract hypotheses
+    import time as _t
+    final_answer = state["content"].strip()
+    if final_answer:
+        try:
+            extracted = await complete_json(
+                system_prompt("router") + "\n\n" + HYPOTHESIS_EXTRACT_INSTRUCTION,
+                f"用户原始问题：{question}\n\n【研究结论】\n{final_answer[:3500]}",
+                max_tokens=2000,
+            )
+        except Exception:  # noqa: BLE001
+            extracted = None
+        items: list[dict] = []
+        if extracted:
+            for j, it in enumerate((extracted.get("items") or [])[:5]):
+                h = str(it.get("hypothesis") or "").strip()
+                if not h:
+                    continue
+                items.append({
+                    "id": f"h{int(_t.time() * 1000) % 1_000_000}_{j}",
+                    "hypothesis": h[:300],
+                    "category": str(it.get("category") or "").strip()[:30],
+                    "probability": str(it.get("probability") or "").strip()[:20],
+                    "scope": str(it.get("scope") or "").strip()[:80],
+                    "horizon": str(it.get("horizon") or "").strip()[:50],
+                    "check": str(it.get("check") or "").strip()[:200],
+                })
+        if items:
+            yield {"type": "logic_items", "items": items}
+            state["tool_trace"].append({"type": "logic_items", "count": len(items),
+                                        "items": items})

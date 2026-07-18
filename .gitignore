@@ -18,12 +18,18 @@ frontend/dist/
 frontend/build/
 
 # Backend (Python)
+.venv/
 backend/venv/
 backend/__pycache__/
 backend/.pytest_cache/
 *.pyc
 *.pyo
 *.pyd
+
+# SQLite runtime
+backend/fever.db
+backend/fever.db-shm
+backend/fever.db-wal
 
 # OS files
 .DS_Store
@@ -41,6 +47,5 @@ backend/data/event_analyses/*.json
 backend/data/free_market_snapshots/*.json
 debug-homepage-stuck-events.md
 
-# Archive/Prototypes (Optional exclusion if you don't want them in VC)
+# Archives / prototypes (kept locally but not in VC)
 archive/
-frontend/vibe-trading-reference/

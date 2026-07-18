@@ -1,83 +1,113 @@
-# FEVER (Fin Event Research)
+# FEVER · Fin EVEnt Research
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![React](https://img.shields.io/badge/React-18.x-blue.svg)
-![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
-![Status](https://img.shields.io/badge/status-active-success.svg)
+> **Hunt events. Trace echoes.**
+> 对话式 AI 金融事件分析工作台：提问即研究。
 
-> **FEVER = 捕获高置信度市场信号，结构化解析事件传导的金融事件研究终端。**
+FEVER 是一个开源的「Claude for Finance Events」——以对话为主轴的投研工作台。
+主理人 Agent 调用 **akshare 真实数据技能**，流式输出结论，并把 K 线、事件研究曲线、
+数据表、证据与研究报告**沉淀为可回看的研究资产**。深度问题可切换「研究团队」模式，
+多专家 Agent 并行作业、复核员把关。
 
-基于 `scan -> shortlist -> dive` 逻辑的深色模式极简阅读流，结合 LLM 动态推演与事实验证网络（Evidence Graph），构建下一代智能投资研究工作台。
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)]()
+[![React](https://img.shields.io/badge/React-18-61dafb.svg)]()
 
-## 🎯 核心特性
+---
 
-- **Global Fever 信号扫描**：实时监控高强度、高时效事件，过滤低置信度市场噪音。
-- **Heat Shifts 热度突变追踪**：追踪短时间内热度异常波动的突发事件与趋势逆转。
-- **沉浸式深度阅读流**：摒弃传统 Dashboard 的拼凑感，采用 960px 中轴阅读流，沉浸式解析事件快照、情景推演与监控清单。
-- **证据图谱 (Evidence Graph)**：集成基于 LLM 的事实验证与逻辑推演网络（支持 React Flow 拓扑可视化），追踪信号传导路径。
-- **突发事件仿真推演**：利用多维环境参数（波动率、流动性、情绪）进行随机压力测试。
-- **全链路监控日志**：提供内置折叠 Console，支持对大模型（如 Volcengine Ark API / QVeris）及执行引擎（Argus）交互链路的调试分析。
+## ✨ 特性
 
-## 📂 目录结构
+- **对话式研究工作台**：左栏研究案例（Case）、中栏对话流、右栏产出物面板。
+  每个 Case 持久化（SQLite），刷新不丢，随时回看、继续追问。
+- **15 个真实数据技能（Skill）**：日K行情、指数、板块、个股新闻、全局快讯、公告检索、
+  财务摘要/指标、研报评级、龙虎榜、融资融券、宏观 CPI/PPI/PMI/GDP/国债收益率、
+  **事件研究法（AR/CAR）**、股票搜索——全部走 akshare 免费接口，零 mock。
+- **Agent 团队模式**：Planner 拆解任务 → 事件猎手 / 行情分析师 / 基本面分析师并行执行 →
+  主理人综合 → 复核员逐条核对「数据事实 vs 模型推断」→ 流式输出。
+- **产出物（Artifacts）体系**：工具结果自动生成 K线图、CAR曲线、数据表、证据卡片，
+  对话内 handoff，右栏大视图查看；一键生成四段式研究报告（数据事实/分析推断/风险/免责声明）。
+- **过程透明**：思考过程、每次工具调用的参数与结果、每个数字的来源接口（如
+  `akshare.stock_news_em`）全部可见、可追溯。
+- **密钥安全**：LLM Key 只存后端 `.env`，绝不下发浏览器。
 
-```text
-FEVER/
-├── frontend/          # 核心前端 (React + Vite + Tailwind CSS + Zustand + React Flow)
-├── backend/           # API 与图谱验证服务 (Python + aiohttp + Argus reproduction)
-├── docs/              # 项目相关文档
-├── archive/           # 早期版本与废弃代码归档
-├── .env.example       # 环境变量配置模板
-├── .gitignore         # Git 忽略配置
-├── LICENSE            # 开源协议
-└── README.md          # 项目说明文档
+## 🏗 架构
+
+```
+┌─────────────────────────── Frontend (React 18 + Vite + Tailwind) ───────────────────────────┐
+│  Sidebar(Case列表) │ ChatPanel(消息流/工具卡/产出物卡) │ RightPanel(产出物·技能·团队)         │
+│  zustand store ─── api.ts (fetch + ReadableStream 解析 SSE)                                  │
+└──────────────────────────────────────────┬───────────────────────────────────────────────────┘
+                                           │ POST /api/chat (SSE) · REST /api/cases|skills|agents
+┌──────────────────────────────────────────▼───────────────────────────────────────────────────┐
+│                      Backend (FastAPI · 单进程 · SQLite 持久化)                               │
+│  routes/chat.py ──► llm.run_agent()  流式 tool-call 循环（≤8轮）                              │
+│                   └► agents/team.py  plan → fan-out(asyncio.gather) → synthesize → verify     │
+│  skills/registry.py  @skill 注册表（统一 ok/data/meta/artifact 协议）                          │
+│  skills/market·news·fundamentals·analysis ──► akshare / sina suggest（线程池+超时+降级）      │
+│  db.py  cases / messages / artifacts 三表                                                    │
+└──────────────────────────────────────────┬───────────────────────────────────────────────────┘
+                                           ▼
+                            Ark LLM (OpenAI 兼容) · akshare 数据源
 ```
 
 ## 🚀 快速开始
 
-### 1. 环境准备
-
-复制环境变量模板并填入您的 API 密钥：
-
 ```bash
-cp .env.example .env
+cp .env.example .env        # 填入你的 ARK_API_KEY（或任意 OpenAI 兼容端点）
+./start.sh                  # 后端 :8000 + 前端 :5173
 ```
 
-配置 `.env` 文件，确保包含您使用的 LLM 与 QVeris 相关的 API Key。
-
-### 2. 启动前端服务
-
-前端采用 Vite 构建，主要依赖于 Tailwind CSS 与 React Flow：
+Docker（单容器，后端托管前端构建产物）：
 
 ```bash
-cd frontend
-npm install
-npm run dev
+docker build -t fever . && docker run -p 8000:8000 fever
+# 打开 http://localhost:8000
 ```
-> 前端默认运行于: `http://localhost:5173` 或 `5174`
 
-### 3. 启动后端 (Argus) 服务
+## 🧭 两种模式
 
-后端负责处理跨域请求并与 LLM 交互以生成验证节点数据：
+| 模式 | 适用 | 链路 |
+|---|---|---|
+| ⚡ 快速问答 | 单一事实/单一标的查询 | 主理人 Agent + ≤8 轮工具循环 |
+| 👥 深度研究团队 | 多维度深度问题 | Planner 拆 2~4 子任务 → 3 专家并行 → 综合 → 复核修正 |
 
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python3 -m argus_repro.frontend.server --port 7860 --host 0.0.0.0
-```
-> 后端 API 默认运行于: `http://localhost:7860/api`
+试试这些问题：
+- 「分析贵州茅台近一个月的事件与股价表现」
+- 「对宁德时代做深度研究」（团队模式）
+- 「用事件研究法看看 600519 在 2026-06-01 前后的超额收益」
+- 「央行国债收益率最近怎么走？」
 
-## 🛠️ 技术栈
+## 🧩 技能清单
 
-- **Frontend**: React, Vite, TypeScript, Tailwind CSS, Zustand, React Flow, Framer Motion, Lucide-React
-- **Backend**: Python 3.10+, aiohttp, aiohttp-cors, Pydantic
-- **AI Integration**: DeepSeek V4 (via Volcengine Ark API), QVeris
+`search_stock` `get_stock_daily` `get_index_daily` `get_sector_spot` `get_stock_news`
+`get_global_news` `get_announcements` `get_financial_abstract` `get_financial_indicator`
+`get_research_reports` `get_lhb` `get_margin` `get_macro` `event_study` `get_current_date`
 
-## 🤝 参与贡献
+> 注：本仓库针对网络环境做了数据源适配——东财行情类接口在部分网络不可用，
+> 日K默认走新浪源、腾讯源兜底；不可用的接口已在设计中剔除，不会产生幻觉数据。
 
-欢迎提交 Issue 和 Pull Request！参与开发前，请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 了解代码规范与提交流程。
+## 👥 Agent 花名册
 
-## 📄 协议
+主理人 Router · 事件猎手 Event Scout · 行情分析师 Market Analyst ·
+基本面分析师 Fundamentals Analyst · 复核员 Verifier · 报告撰写员 Report Writer
 
-本项目基于 [MIT License](./LICENSE) 开源。
+## 🗺 路线图
+
+工作台是 TTRL（Test-Time Reinforcement Learning）的产品地基：当输入、证据、结论、
+复盘都被结构化记录后，接入「预测命中评估 → reward 计算 → calibration 更新 →
+skill/prompt 策略更新」的长期自进化闭环。
+
+- [x] P0 对话式研究闭环（提问→采证→产出物→Case 沉淀）
+- [x] P0 事件研究法引擎（AR/CAR）
+- [ ] P1 研究资产化：历史 Case 检索、证据有效性标注、复盘面板
+- [ ] P1 事件监控与预警（定时任务 + 推送）
+- [ ] P2 TTRL v0：命中率统计、calibration 面板
+- [ ] P2 接入 Argus 深度采证引擎（见 v2 仓库归档）
+
+## ⚠️ 免责声明
+
+本项目仅供学习与研究使用，所有输出不构成任何投资建议。
+数据来自 akshare 免费公开接口，准确性以原始数据源为准。
+
+## 📄 License
+
+MIT

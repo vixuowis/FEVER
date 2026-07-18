@@ -1,0 +1,785 @@
+import { create } from "zustand";
+import { api, streamChat, StreamAbortedError } from "./api";
+import type {
+  AgentMeta,
+  Artifact,
+  ArtifactKind,
+  CaseItem,
+  HistoryMessage,
+  LogicCheckEntry,
+  LogicItem,
+  Message,
+  Mode,
+  Part,
+  PlanItem,
+  RightTab,
+  SkillMeta,
+  SSEEvent,
+} from "./types";
+import { uid } from "./utils";
+
+/* ---------------- logic library 持久化 ---------------- */
+
+const LOGIC_KEY = "fever.logic_library.v1";
+
+function loadLogicLibrary(): LogicItem[] {
+  try {
+    const raw = localStorage.getItem(LOGIC_KEY);
+    if (!raw) return [];
+    const j = JSON.parse(raw) as LogicItem[];
+    return Array.isArray(j) ? j : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLogicLibrary(items: LogicItem[]) {
+  try {
+    localStorage.setItem(LOGIC_KEY, JSON.stringify(items));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
+/* ---------------- parts 工具 ---------------- */
+
+/** thinking / token delta：与上一同类型同 agent part 合并追加 */
+function appendDelta(parts: Part[], type: "thinking" | "text", agent: string | undefined, delta: string): Part[] {
+  const last = parts[parts.length - 1];
+  if (last && last.type === type && last.agent === agent) {
+    return [...parts.slice(0, -1), { ...last, text: last.text + delta }];
+  }
+  return [...parts, { type, agent, text: delta } as Part];
+}
+
+function sortArtifacts(xs: Artifact[]): Artifact[] {
+  return [...xs].sort((a, b) => {
+    const p = (b.pinned ?? 0) - (a.pinned ?? 0);
+    if (p !== 0) return p;
+    return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+  });
+}
+
+function sortCases(xs: CaseItem[]): CaseItem[] {
+  return [...xs].sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+}
+
+function firstArtifactId(it: Record<string, unknown>): string | undefined {
+  if (Array.isArray(it.artifact_ids) && it.artifact_ids.length > 0) return String(it.artifact_ids[0]);
+  if (it.artifact_id) return String(it.artifact_id);
+  if (it.artifactId) return String(it.artifactId);
+  return undefined;
+}
+
+/**
+ * 历史消息重渲染：把后端落库的 tool_trace 还原成 parts 卡片流。
+ * 后端形态（见 backend/app/llm.py · agents/team.py）：
+ *   {"type":"tool", agent, id, skill, args, ok, preview, artifact_ids[]}
+ *   {"type":"plan", plan:[{agent, task, agent_name}]}
+ *   {"type":"agent_findings", agent, findings}
+ *   {"type":"verify", verdict, issues[], corrected}
+ * 同时兼容 tool_call / tool_result / artifact / thinking / token / agent_step 条目。
+ */
+export function partsFromHistory(m: HistoryMessage): Part[] {
+  const parts: Part[] = [];
+  let trace: unknown = m.tool_trace ?? null;
+  if (typeof trace === "string") {
+    try {
+      trace = JSON.parse(trace);
+    } catch {
+      trace = null;
+    }
+  }
+  const list: unknown[] = Array.isArray(trace)
+    ? trace
+    : trace && typeof trace === "object" && Array.isArray((trace as { parts?: unknown[] }).parts)
+      ? (trace as { parts: unknown[] }).parts
+      : [];
+
+  for (const raw of list) {
+    if (!raw || typeof raw !== "object") continue;
+    const it = raw as Record<string, unknown>;
+    const t = String(it.type ?? "");
+    const agent = (it.agent as string) ?? undefined;
+
+    if (t === "tool" || t === "tool_call" || t === "tool_result" || (!t && (it.skill || it.name))) {
+      const ok = it.ok !== false && it.status !== "error";
+      const artifactId = firstArtifactId(it);
+      if (t === "tool_result") {
+        const id = String(it.id ?? "");
+        const idx = parts.findIndex((p) => p.type === "tool_call" && p.id === id);
+        if (idx >= 0) {
+          const p = parts[idx] as Extract<Part, { type: "tool_call" }>;
+          parts[idx] = {
+            ...p,
+            status: ok ? "done" : "error",
+            preview: (it.preview as string) ?? p.preview,
+            artifactId: artifactId ?? p.artifactId,
+          };
+          continue;
+        }
+      }
+      parts.push({
+        type: "tool_call",
+        id: String(it.id ?? uid()),
+        agent,
+        skill: String(it.skill ?? it.name ?? it.tool ?? "tool"),
+        args: (it.args ?? it.arguments) as Record<string, unknown> | undefined,
+        status: ok ? "done" : "error",
+        preview: (it.preview ?? it.result_preview) as string | undefined,
+        artifactId,
+      });
+    } else if (t === "thinking" || t === "thought") {
+      const text = String(it.text ?? it.delta ?? it.content ?? "");
+      if (text) parts.push({ type: "thinking", agent, text });
+    } else if (t === "plan") {
+      parts.push({ type: "agent_step", phase: "plan", plan: (it.plan as PlanItem[]) ?? [] });
+    } else if (t === "agent_findings") {
+      const findings = String(it.findings ?? "");
+      parts.push({
+        type: "agent_step",
+        phase: "agent_done",
+        agent,
+        note: findings.length > 200 ? findings.slice(0, 200) + "…" : findings,
+      });
+    } else if (t === "verify") {
+      const issues = (it.issues as string[]) ?? [];
+      parts.push({
+        type: "agent_step",
+        phase: "verified",
+        agent: agent ?? "verifier",
+        verdict: String(it.verdict ?? ""),
+        note: issues.length > 0 ? issues.join("；") : "未发现事实性错误",
+      });
+    } else if (t === "artifact") {
+      const artifactId = firstArtifactId(it) ?? String(it.id ?? "");
+      if (artifactId) {
+        parts.push({
+          type: "artifact",
+          agent,
+          artifactId,
+          kind: (it.kind ?? "table") as ArtifactKind,
+          title: String(it.title ?? "产出物"),
+        });
+      }
+    } else if (t === "logic_items") {
+      const rawItems = (it.items as Array<Record<string, unknown>>) ?? [];
+      if (rawItems.length > 0) {
+        const items: LogicItem[] = rawItems.map((x) => ({
+          id: String(x.id ?? uid()),
+          case_id: (x.case_id as string | null | undefined) ?? null,
+          message_id: (x.message_id as string | null | undefined) ?? null,
+          question: (x.question as string | undefined) ?? "",
+          hypothesis: String(x.hypothesis ?? ""),
+          category: String(x.category ?? ""),
+          probability: String(x.probability ?? ""),
+          scope: String(x.scope ?? ""),
+          horizon: String(x.horizon ?? ""),
+          check: String(x.check ?? ""),
+          status: ((x.status as LogicItem["status"]) ?? "pending"),
+          created_at: String(x.created_at ?? new Date().toISOString()),
+          verified_at: (x.verified_at as string | null | undefined) ?? null,
+          verification_note: (x.verification_note as string | undefined) ?? "",
+        }));
+        parts.push({ type: "logic_items", items });
+      }
+    } else if (t === "token" || t === "text") {
+      const text = String(it.text ?? it.delta ?? it.content ?? "");
+      if (text) parts.push({ type: "text", agent, text });
+    } else if (t === "agent_step") {
+      parts.push({
+        type: "agent_step",
+        phase: String(it.phase ?? ""),
+        agent,
+        note: it.note as string | undefined,
+        plan: it.plan as PlanItem[] | undefined,
+        verdict: it.verdict as string | undefined,
+      });
+    }
+  }
+
+  if (m.content) {
+    const last = parts[parts.length - 1];
+    if (!(last?.type === "text" && last.text === m.content)) {
+      parts.push({ type: "text", agent: m.agent ?? undefined, text: m.content });
+    }
+  }
+  return parts;
+}
+
+/* ---------------- store ---------------- */
+
+interface FeverState {
+  cases: CaseItem[];
+  currentCaseId: string | null;
+  messages: Message[];
+  artifacts: Artifact[];
+  skills: SkillMeta[];
+  agents: AgentMeta[];
+  rightTab: RightTab;
+  rightOpen: boolean;
+  selectedArtifactId: string | null;
+  streaming: boolean;
+  mode: Mode;
+  loadingCase: boolean;
+  generatingReport: boolean;
+  initialized: boolean;
+
+  /** 研究逻辑库（design.md §6.4） */
+  logicLibrary: LogicItem[];
+  /** 右栏：是否显示逻辑库浮层（独立于 artifacts/skills/team） */
+  logicLibOpen: boolean;
+
+  init: () => Promise<void>;
+  sendMessage: (text: string, mode?: Mode) => Promise<void>;
+  stop: () => void;
+  loadCase: (id: string) => Promise<void>;
+  newCase: () => void;
+  deleteCase: (id: string) => Promise<void>;
+  pinArtifact: (artifactId: string) => Promise<void>;
+  genReport: () => Promise<void>;
+  selectArtifact: (id: string | null) => void;
+  setRightTab: (t: RightTab) => void;
+  setRightOpen: (v: boolean) => void;
+  setMode: (m: Mode) => void;
+
+  /** 库操作：新增/更新/忽略 */
+  addLogicItems: (items: LogicItem[]) => void;
+  updateLogicItem: (id: string, patch: Partial<LogicItem>) => void;
+  dismissLogicItem: (id: string) => void;
+  /** 深度验证（调后端 /api/logic/auto_check，自动入档） */
+  autoCheckLogic: (id: string) => Promise<LogicItem | null>;
+  /** 把一条 check entry 追加到 check_history（用于手动标记） */
+  markLogicCheck: (id: string, status: LogicItem["status"], note?: string) => void;
+  /** 重新追踪：以某条 logic 为种子开启新研究 */
+  reverifyLogic: (item: LogicItem) => void;
+  setLogicLibOpen: (v: boolean) => void;
+  /** 正在被深度验证的 logic id（用于 UI loading 态） */
+  logicChecking: Set<string>;
+}
+
+let abortCtl: AbortController | null = null;
+/** 当前流式所属 case / message / question：logic_items 事件入库存档时使用 */
+let currentCtx: { caseId: string; messageId: string; question: string } | null = null;
+
+export const useStore = create<FeverState>((set, get) => {
+  /** 更新流式中的 assistant 消息 */
+  const patchPending = (fn: (m: Message) => Message) => {
+    set((s) => {
+      const idx = s.messages.findIndex((m) => m.pending);
+      if (idx < 0) return s;
+      const next = [...s.messages];
+      next[idx] = fn(next[idx]);
+      return { messages: next };
+    });
+  };
+
+  const patchParts = (fn: (parts: Part[]) => Part[]) => {
+    patchPending((m) => ({ ...m, parts: fn(m.parts ?? []) }));
+  };
+
+  const finalizePending = (fn?: (m: Message) => Message) => {
+    set((s) => ({
+      messages: s.messages.map((m) => (m.pending ? { ...m, ...(fn?.(m) ?? {}), pending: false } : m)),
+      streaming: false,
+    }));
+  };
+
+  const handleEvent = (ev: SSEEvent) => {
+    switch (ev.type) {
+      case "meta":
+        if (ev.mode) patchPending((m) => ({ ...m, mode: ev.mode }));
+        break;
+      case "thinking":
+        if (ev.delta) patchParts((p) => appendDelta(p, "thinking", ev.agent, ev.delta!));
+        break;
+      case "token":
+        if (ev.delta) patchParts((p) => appendDelta(p, "text", ev.agent, ev.delta!));
+        break;
+      case "tool_call":
+        patchParts((p) => [
+          ...p,
+          {
+            type: "tool_call",
+            id: ev.id ?? uid(),
+            agent: ev.agent,
+            skill: ev.skill ?? "tool",
+            args: ev.args,
+            status: "running",
+          },
+        ]);
+        break;
+      case "tool_result":
+        patchParts((parts) => {
+          const idx = parts.findIndex((p) => p.type === "tool_call" && p.id === ev.id);
+          if (idx < 0) return parts;
+          const next = [...parts];
+          const p = next[idx] as Extract<Part, { type: "tool_call" }>;
+          next[idx] = {
+            ...p,
+            status: ev.ok === false ? "error" : "done",
+            preview: ev.preview,
+            artifactId: ev.artifact_id ?? p.artifactId,
+          };
+          return next;
+        });
+        break;
+      case "artifact": {
+        const a = ev.artifact;
+        if (!a) break;
+        set((st) => ({
+          artifacts: sortArtifacts([...st.artifacts.filter((x) => x.id !== a.id), a]),
+        }));
+        patchParts((p) => [
+          ...p,
+          { type: "artifact", agent: ev.agent, artifactId: a.id, kind: a.kind, title: a.title },
+        ]);
+        break;
+      }
+      case "agent_step":
+        patchParts((p) => [
+          ...p,
+          {
+            type: "agent_step",
+            phase: ev.phase ?? "",
+            agent: ev.agent,
+            note: ev.note,
+            plan: ev.plan,
+            verdict: ev.verdict,
+          },
+        ]);
+        break;
+      case "logic_items": {
+        const items = ev.items ?? [];
+        if (items.length === 0) break;
+        // 1) 渲染到当前消息（part 流中追加）
+        patchParts((p) => [...p, { type: "logic_items", items }]);
+        // 2) 持久化入库（补全 case / message / question 上下文）
+        const ctx = currentCtx;
+        const enriched = items.map((x) => ({
+          ...x,
+          case_id: x.case_id ?? ctx?.caseId ?? null,
+          message_id: x.message_id ?? ctx?.messageId ?? null,
+          question: x.question || ctx?.question || "",
+        }));
+        get().addLogicItems(enriched);
+        break;
+      }
+      case "case_title":
+        if (ev.title) {
+          set((st) => ({
+            cases: st.cases.map((c) => (c.id === st.currentCaseId ? { ...c, title: ev.title! } : c)),
+          }));
+        }
+        break;
+      case "done":
+        finalizePending((m) => ({ ...m, id: ev.message_id ?? m.id }));
+        // 刷新 case 列表（updated_at / message_count）
+        api
+          .cases()
+          .then((cases) => set({ cases: sortCases(cases) }))
+          .catch(() => void 0);
+        break;
+      case "error":
+        patchParts((p) => [...p, { type: "text", text: `⚠️ ${ev.message ?? "发生未知错误"}` }]);
+        finalizePending((m) => ({ ...m, error: true }));
+        break;
+    }
+  };
+
+  return {
+    cases: [],
+    currentCaseId: null,
+    messages: [],
+    artifacts: [],
+    skills: [],
+    agents: [],
+    rightTab: "artifacts",
+    rightOpen: true,
+    selectedArtifactId: null,
+    streaming: false,
+    mode: "auto",
+    loadingCase: false,
+    generatingReport: false,
+    initialized: false,
+    logicLibrary: loadLogicLibrary(),
+    logicLibOpen: false,
+    logicChecking: new Set<string>(),
+
+    init: async () => {
+      if (get().initialized) return;
+      set({ initialized: true });
+      const [cases, skills, agents] = await Promise.allSettled([
+        api.cases(),
+        api.skills(),
+        api.agents(),
+      ]);
+      set({
+        cases: cases.status === "fulfilled" ? sortCases(cases.value) : [],
+        skills: skills.status === "fulfilled" ? skills.value : [],
+        agents: agents.status === "fulfilled" ? agents.value : [],
+      });
+    },
+
+    sendMessage: async (text, mode) => {
+      const content = text.trim();
+      if (!content || get().streaming) return;
+      // 防御性：进入时先 abort 任何残留的旧 controller（HMR / 异常路径留下的孤儿）
+      abortCtl?.abort();
+      const useMode = mode ?? get().mode;
+
+      let caseId = get().currentCaseId;
+      if (!caseId) {
+        try {
+          const c = await api.createCase();
+          caseId = c.id;
+          set((s) => ({ currentCaseId: c.id, cases: sortCases([c, ...s.cases]) }));
+        } catch (e) {
+          set((s) => ({
+            messages: [
+              ...s.messages,
+              {
+                id: uid(),
+                role: "assistant",
+                content: `⚠️ 创建研究失败：${e instanceof Error ? e.message : String(e)}`,
+                error: true,
+              },
+            ],
+          }));
+          return;
+        }
+      }
+
+      const now = new Date().toISOString();
+      const userMsg: Message = { id: uid(), role: "user", content, created_at: now };
+      const asstMsg: Message = {
+        id: uid(),
+        role: "assistant",
+        content: "",
+        parts: [],
+        pending: true,
+        mode: useMode,
+        created_at: now,
+      };
+      set((s) => ({
+        messages: [...s.messages, userMsg, asstMsg],
+        streaming: true,
+        mode: useMode,
+      }));
+
+      abortCtl = new AbortController();
+      currentCtx = { caseId, messageId: asstMsg.id, question: content };
+      try {
+        await streamChat(
+          { case_id: caseId, message: content, mode: useMode },
+          { onEvent: handleEvent, signal: abortCtl.signal },
+        );
+        // 流正常结束但未收到 done/error 时兜底收尾
+        if (get().streaming) finalizePending();
+      } catch (e) {
+        if (e instanceof StreamAbortedError) {
+          patchParts((p) => [...p, { type: "text", text: "*已停止生成。*" }]);
+          finalizePending();
+        } else {
+          patchParts((p) => [
+            ...p,
+            { type: "text", text: `⚠️ 请求失败：${e instanceof Error ? e.message : String(e)}` },
+          ]);
+          finalizePending((m) => ({ ...m, error: true }));
+        }
+      } finally {
+        abortCtl = null;
+        currentCtx = null;
+      }
+    },
+
+    stop: () => {
+      abortCtl?.abort();
+    },
+
+    loadCase: async (id) => {
+      if (get().streaming) get().stop();
+      set({ loadingCase: true, currentCaseId: id, selectedArtifactId: null });
+      try {
+        const d = await api.caseDetail(id);
+        const messages: Message[] = d.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          agent: m.agent,
+          created_at: m.created_at,
+          parts: m.role === "assistant" ? partsFromHistory(m) : undefined,
+        }));
+        set({
+          messages,
+          artifacts: sortArtifacts(d.artifacts ?? []),
+          cases: sortCases(
+            get().cases.some((c) => c.id === id)
+              ? get().cases.map((c) => (c.id === id ? { ...c, ...d.case } : c))
+              : [...get().cases, d.case],
+          ),
+        });
+      } catch (e) {
+        set({
+          messages: [
+            {
+              id: uid(),
+              role: "assistant",
+              content: `⚠️ 加载研究失败：${e instanceof Error ? e.message : String(e)}`,
+              error: true,
+            },
+          ],
+          artifacts: [],
+        });
+      } finally {
+        set({ loadingCase: false });
+      }
+    },
+
+    newCase: () => {
+      if (get().streaming) get().stop();
+      set({
+        currentCaseId: null,
+        messages: [],
+        artifacts: [],
+        selectedArtifactId: null,
+        rightTab: "artifacts",
+      });
+    },
+
+    deleteCase: async (id) => {
+      try {
+        await api.deleteCase(id);
+      } catch {
+        /* 即使失败也从列表移除 */
+      }
+      set((s) => {
+        const cases = s.cases.filter((c) => c.id !== id);
+        if (s.currentCaseId === id) {
+          return {
+            cases,
+            currentCaseId: null,
+            messages: [],
+            artifacts: [],
+            selectedArtifactId: null,
+          };
+        }
+        return { cases };
+      });
+    },
+
+    pinArtifact: async (artifactId) => {
+      const caseId = get().currentCaseId;
+      if (!caseId) return;
+      // 乐观更新
+      set((s) => ({
+        artifacts: sortArtifacts(
+          s.artifacts.map((a) =>
+            a.id === artifactId ? { ...a, pinned: a.pinned ? 0 : 1 } : a,
+          ),
+        ),
+      }));
+      try {
+        const r = await api.pinArtifact(caseId, artifactId);
+        set((s) => ({
+          artifacts: sortArtifacts(
+            s.artifacts.map((a) => (a.id === artifactId ? { ...a, pinned: r.pinned } : a)),
+          ),
+        }));
+      } catch {
+        /* 保持乐观状态 */
+      }
+    },
+
+    genReport: async () => {
+      const caseId = get().currentCaseId;
+      if (!caseId || get().generatingReport) return;
+      set({ generatingReport: true, rightTab: "artifacts", rightOpen: true });
+      try {
+        const artifact = await api.genReport(caseId);
+        set((s) => ({
+          artifacts: sortArtifacts([artifact, ...s.artifacts.filter((a) => a.id !== artifact.id)]),
+          selectedArtifactId: artifact.id,
+        }));
+      } catch (e) {
+        set((s) => ({
+          messages: [
+            ...s.messages,
+            {
+              id: uid(),
+              role: "assistant",
+              content: `⚠️ 生成研究报告失败：${e instanceof Error ? e.message : String(e)}`,
+              error: true,
+            },
+          ],
+        }));
+      } finally {
+        set({ generatingReport: false });
+      }
+    },
+
+    selectArtifact: (id) => {
+      set({ selectedArtifactId: id, rightTab: "artifacts", rightOpen: true });
+    },
+    setRightTab: (t) => set({ rightTab: t, rightOpen: true }),
+    setRightOpen: (v) => set({ rightOpen: v }),
+    setMode: (m) => set({ mode: m }),
+
+    /* ---------------- research logic library ---------------- */
+    addLogicItems: (items) => {
+      set((s) => {
+        const seen = new Set(s.logicLibrary.map((x) => x.id));
+        const merged: LogicItem[] = [...s.logicLibrary];
+        for (const it of items) {
+          if (seen.has(it.id)) continue;
+          // 兜底字段
+          merged.push({
+            ...it,
+            check_history: it.check_history ?? [],
+            next_check_at: it.next_check_at ?? null,
+            last_check_at: it.last_check_at ?? null,
+          });
+        }
+        saveLogicLibrary(merged);
+        return { logicLibrary: merged };
+      });
+    },
+    updateLogicItem: (id, patch) => {
+      set((s) => {
+        const next = s.logicLibrary.map((x) =>
+          x.id === id ? { ...x, ...patch } : x,
+        );
+        saveLogicLibrary(next);
+        return { logicLibrary: next };
+      });
+    },
+    dismissLogicItem: (id) => {
+      get().updateLogicItem(id, {
+        status: "dismissed",
+        verified_at: new Date().toISOString(),
+      });
+    },
+    markLogicCheck: (id, status, note) => {
+      const now = new Date().toISOString();
+      const entry: LogicCheckEntry = {
+        at: now,
+        verdict: status,
+        reasoning: note ?? `人工标记为「${status}」`,
+        source: "manual",
+      };
+      set((s) => {
+        const next = s.logicLibrary.map((x) => {
+          if (x.id !== id) return x;
+          return {
+            ...x,
+            status,
+            verified_at: now,
+            verification_note: note ?? x.verification_note,
+            last_check_at: now,
+            check_history: [entry, ...(x.check_history ?? [])],
+          };
+        });
+        saveLogicLibrary(next);
+        return { logicLibrary: next };
+      });
+    },
+    autoCheckLogic: async (id) => {
+      const item = get().logicLibrary.find((x) => x.id === id);
+      if (!item) return null;
+      // 标记 loading
+      set((s) => {
+        const ns = new Set(s.logicChecking);
+        ns.add(id);
+        return { logicChecking: ns };
+      });
+      try {
+        const res = await api.logicAutoCheck({
+          hypothesis: item.hypothesis,
+          category: item.category,
+          scope: item.scope,
+          horizon: item.horizon,
+          check: item.check,
+          question: item.question,
+        });
+        const now = new Date().toISOString();
+        const entry: LogicCheckEntry = {
+          at: now,
+          verdict: res.verdict,
+          reasoning: res.reasoning,
+          data_summary: res.data_summary,
+          next_check_at: res.next_check_at,
+          evidence: res.evidence,
+          source: "auto",
+        };
+        // verdict → status 映射
+        const status: LogicItem["status"] =
+          res.verdict === "verified" ? "verified"
+          : res.verdict === "rejected" ? "rejected"
+          : res.verdict === "pending_scheduled" ? "pending_scheduled"
+          : res.verdict === "error" ? "inconclusive"
+          : "inconclusive";
+        let nextItem: LogicItem | null = null;
+        set((s) => {
+          const next = s.logicLibrary.map((x) => {
+            if (x.id !== id) return x;
+            nextItem = {
+              ...x,
+              status,
+              verified_at: status === "verified" || status === "rejected" ? now : x.verified_at,
+              last_check_at: now,
+              next_check_at: res.next_check_at ?? null,
+              verification_note:
+                status === "verified" || status === "rejected"
+                  ? (res.data_summary || res.reasoning).slice(0, 200)
+                  : x.verification_note,
+              check_history: [entry, ...(x.check_history ?? [])],
+            };
+            return nextItem;
+          });
+          saveLogicLibrary(next);
+          return { logicLibrary: next };
+        });
+        return nextItem;
+      } catch (e) {
+        // 错误落档到 check_history 但不改变 status
+        const now = new Date().toISOString();
+        const entry: LogicCheckEntry = {
+          at: now,
+          verdict: "error",
+          reasoning: `深度验证异常: ${e instanceof Error ? e.message : String(e)}`,
+          source: "auto",
+        };
+        set((s) => {
+          const next = s.logicLibrary.map((x) => {
+            if (x.id !== id) return x;
+            return {
+              ...x,
+              last_check_at: now,
+              check_history: [entry, ...(x.check_history ?? [])],
+            };
+          });
+          saveLogicLibrary(next);
+          return { logicLibrary: next };
+        });
+        return null;
+      } finally {
+        set((s) => {
+          const ns = new Set(s.logicChecking);
+          ns.delete(id);
+          return { logicChecking: ns };
+        });
+      }
+    },
+    reverifyLogic: (item) => {
+      // 把 hypothesis + horizon 注入新 case，作为再次验证的种子问题
+      const scope = item.scope ? `（涉及 ${item.scope}）` : "";
+      const horizon = item.horizon ? `；验证窗口：${item.horizon}` : "";
+      const check = item.check ? `；如何验证：${item.check}` : "";
+      const seed = `请复盘/验证以下研究逻辑：\n「${item.hypothesis}」${scope}${horizon}${check}\n\n请调取最近市场数据，给出当前是否被证实/证伪，列出关键证据。`;
+      // 切换到新研究并直接发问
+      get().newCase();
+      void get().sendMessage(seed, "team");
+    },
+    setLogicLibOpen: (v) => set({ logicLibOpen: v }),
+  };
+});

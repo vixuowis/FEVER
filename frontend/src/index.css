@@ -1,38 +1,47 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@400;500;600;700&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  body {
-    @apply bg-[#050505] text-gray-300 font-sans antialiased selection:bg-gray-800 selection:text-white;
-  }
+/* FEVER 暖纸感研究工作台 —— design.md §10 */
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
-@layer components {
-  .glass-panel {
-    @apply bg-[#0A0A0A] border border-white/5 rounded-xl shadow-sm;
-  }
-  
-  .text-glow {
-    @apply text-white;
-  }
+body {
+  background-color: #faf9f7;
+  color: #1c1b1a;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+::selection {
+  background: rgba(180, 83, 9, 0.16);
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
+/* 细滚动条 */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
   background: transparent;
 }
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+*::-webkit-scrollbar-thumb {
+  background: #d8d4cc;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #b9b4aa;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }
 
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+/* echarts tooltip 字体 */
+div[class*="echarts-tooltip"] {
+  font-family: inherit !important;
 }
