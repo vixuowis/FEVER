@@ -2,7 +2,7 @@
 
 export type Mode = "auto" | "team";
 export type RightTab = "artifacts" | "skills" | "team" | "logic";
-export type ArtifactKind = "kline" | "line" | "table" | "evidence" | "report";
+export type ArtifactKind = "kline" | "line" | "table" | "evidence" | "report" | "graph";
 
 /** 左栏研究案例（POST /api/cases 返回时不带 message_count） */
 export interface CaseItem {

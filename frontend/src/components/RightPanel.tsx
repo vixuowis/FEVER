@@ -24,6 +24,7 @@ import KlineChart from "./KlineChart";
 import CarChart from "./CarChart";
 import DataTable from "./DataTable";
 import Markdown from "./Markdown";
+import GraphView from "./GraphView";
 import LogicLibraryTab from "./LogicLibraryTab";
 
 /* ---------------- 证据卡列表 ---------------- */
@@ -154,6 +155,7 @@ function ArtifactDetail({ artifact }: { artifact: Artifact }) {
         {artifact.kind === "table" && <DataTable payload={artifact.payload} />}
         {artifact.kind === "evidence" && <EvidenceView payload={artifact.payload} />}
         {artifact.kind === "report" && <ReportView payload={artifact.payload} />}
+        {artifact.kind === "graph" && <GraphView payload={artifact.payload} />}
       </div>
     </div>
   );
