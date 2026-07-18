@@ -424,12 +424,12 @@ async def event_study_skill(event_date: str, symbol: str | None = None,
             code = "".join(ch for ch in str(cand) if ch.isdigit())[-6:]
     if not code:
         return err("必须提供 symbol 或 keyword")
-    from datetime import datetime, timedelta
-    end = (datetime.strptime(event_date, "%Y-%m-%d") + timedelta(days=window_days)).strftime("%Y%m%d")
-    start = (datetime.strptime(event_date, "%Y-%m-%d") - timedelta(days=window_days)).strftime("%Y%m%d")
+    # event_study 子能力用 pre/post 表达事件窗口；window_days 转为单边窗口长度
+    pre = max(1, min(int(window_days or 30), 60))
+    post = pre
     result = await execute_skill("event_study", {
         "event_date": event_date, "symbol": code,
-        "start_date": start, "end_date": end,
+        "pre": pre, "post": post,
     })
     if not result.get("ok"):
         return result
