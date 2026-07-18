@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Network, CheckCircle2, AlertTriangle, HelpCircle, XCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, HelpCircle, XCircle, Eye, ListTree, Network } from "lucide-react";
 import Markdown from "./Markdown";
+import GraphFlow from "./GraphFlow";
 import { cls } from "../utils";
 
 /** 证据图（EvidenceGraph）渲染。payload 结构见 evidence_graph.EvidenceGraph.to_payload() */
@@ -14,8 +15,8 @@ export default function GraphView({ payload }: { payload: any }) {
   const scope: string = payload?.scope || "";
   const stopReason: string = payload?.stop_reason || "";
   const markdown: string = payload?.markdown || "";
-  const [showNodes, setShowNodes] = useState(false);
   const [showEdges, setShowEdges] = useState(false);
+  const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
 
   const claimStatus = stats.claim_status || {};
 
@@ -81,18 +82,43 @@ export default function GraphView({ payload }: { payload: any }) {
         </div>
       )}
 
-      {/* 节点列表（折叠） */}
+      {/* 图谱可视化（默认） / 详细列表（切换） */}
       {nodes.length > 0 && (
         <div className="rounded-card border border-edge bg-card shadow-card">
-          <button
-            onClick={() => setShowNodes((v) => !v)}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-medium text-mute hover:bg-page"
-          >
-            {showNodes ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            节点列表（{nodes.length}）
-          </button>
-          {showNodes && (
-            <ul className="space-y-1.5 border-t border-edge px-3 py-2 text-[12px]">
+          <div className="flex items-center justify-between border-b border-edge px-3 py-2">
+            <div className="flex items-center gap-3 text-[12px] font-medium text-mute">
+              <span>{nodes.length} 节点 · {edges.length} 边</span>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-edge bg-page p-0.5 text-[11px]">
+              <button
+                onClick={() => setViewMode("graph")}
+                className={cls(
+                  "flex items-center gap-1 rounded-md px-2 py-1 transition-colors",
+                  viewMode === "graph" ? "bg-card text-ink shadow-sm" : "text-faint hover:text-mute",
+                )}
+              >
+                <Eye size={12} /> 图谱
+              </button>
+              <button
+                onClick={() => setViewMode("list")}
+                className={cls(
+                  "flex items-center gap-1 rounded-md px-2 py-1 transition-colors",
+                  viewMode === "list" ? "bg-card text-ink shadow-sm" : "text-faint hover:text-mute",
+                )}
+              >
+                <ListTree size={12} /> 列表
+              </button>
+            </div>
+          </div>
+          {viewMode === "graph" ? (
+            <div className="bg-page px-2 pb-2">
+              <GraphFlow payload={payload} height={Math.max(360, Math.min(560, nodes.length * 60 + 240))} />
+              <div className="px-2 pt-1 text-[10.5px] text-faint">
+                提示：滚轮缩放 · 拖拽节点 · hover 节点高亮关联边
+              </div>
+            </div>
+          ) : (
+            <ul className="space-y-1.5 px-3 py-2 text-[12px]">
               {nodes.map((n) => (
                 <li key={n.id} className="flex items-start gap-2">
                   <NodeKindBadge kind={n.kind} status={n.status} />
@@ -116,6 +142,8 @@ export default function GraphView({ payload }: { payload: any }) {
         </div>
       )}
 
+      {/* 节点列表（折叠）—— viewMode="list" 已包含，这里只留边列表 */}
+
       {/* 边列表（折叠） */}
       {edges.length > 0 && (
         <div className="rounded-card border border-edge bg-card shadow-card">
@@ -124,7 +152,7 @@ export default function GraphView({ payload }: { payload: any }) {
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-medium text-mute hover:bg-page"
           >
             {showEdges ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            关系边（{edges.length}）
+            关系边列表（{edges.length}）
           </button>
           {showEdges && (
             <ul className="space-y-1 border-t border-edge px-3 py-2 text-[12px]">
@@ -142,8 +170,8 @@ export default function GraphView({ payload }: { payload: any }) {
         </div>
       )}
 
-      {/* missing 单独提示（如果没折叠展开） */}
-      {!showNodes && missing.length > 0 && (
+      {/* missing 单独提示 */}
+      {missing.length > 0 && (
         <div className="rounded-card border border-amber/40 bg-amber-soft p-3 text-[12px] text-amber">
           <div className="mb-1 font-medium">研究缺口（{missing.length}）</div>
           <ul className="space-y-0.5">
