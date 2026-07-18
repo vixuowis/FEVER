@@ -92,24 +92,14 @@ function buildOption(payload: any) {
   const links: any[] = (payload?.edges || []).map((e: any) => ({
     source: e.src,
     target: e.dst,
+    // link 个性化颜色通过 lineStyle.color 实现（series.lineStyle 默认值兜底）
     lineStyle: {
       color: EDGE_COLOR[e.relation] || MUTE,
       width: 1.4,
-      curveness: 0.18,
       opacity: 0.85,
     },
-    label: {
-      show: true,
-      formatter: EDGE_LABEL[e.relation] || e.relation,
-      fontSize: 9,
-      color: EDGE_COLOR[e.relation] || MUTE,
-      backgroundColor: "rgba(255,255,255,0.85)",
-      padding: [1, 3],
-      borderRadius: 3,
-    },
-    // echarts 关系图需要 symbol: ['none', 'arrow'] 显示箭头
-    symbol: ["none", "arrow"],
-    symbolSize: 6,
+    // 给 edgeLabel.formatter 用的元数据（series.edgeLabel.show=true 才会显示）
+    _relation: e.relation,
   }));
 
   // 补全缺失节点（如果某个 edge 的 src/dst 不在 nodes 里，echarts 会静默丢弃，
@@ -137,7 +127,9 @@ function buildOption(payload: any) {
       extraCssText: "box-shadow: 0 2px 12px rgba(0,0,0,0.08); border-radius: 8px; max-width: 320px;",
       formatter: (params: any) => {
         if (params.dataType === "edge") {
-          return `<div style="font-weight:600;color:${EDGE_COLOR[params.data?.lineStyle?.color] || MUTE}">${params.data?.label?.formatter || "关系"}</div>`;
+          const rel = params.data?._relation || "关系";
+          const color = EDGE_COLOR[rel] || MUTE;
+          return `<div style="font-weight:600;color:${color}">${EDGE_LABEL[rel] || rel}</div>`;
         }
         const d = params.data || {};
         const status = d._status ? ` · <span style="color:${NODE_COLOR[d._status] || MUTE}">${d._status}</span>` : "";
@@ -197,9 +189,25 @@ function buildOption(payload: any) {
           itemStyle: { borderColor: "#1C1B1A", borderWidth: 2 },
           label: { fontSize: 11, fontWeight: 700 },
         },
-        lineStyle: { opacity: 0.85 },
+        // series 顶层的 lineStyle 才生效，links[].lineStyle.curveness 会被忽略
+        // 也不要在 link 子项里设 label（会被 series.edgeLabel 覆盖但偶尔丢 link）
+        lineStyle: { opacity: 0.85, curveness: 0.18, color: MUTE, width: 1.4 },
         edgeSymbol: ["none", "arrow"],
         edgeSymbolSize: 6,
+        // 关系 label 走 series.edgeLabel，每条 link 通过 _relation 字段定制文案
+        edgeLabel: {
+          show: true,
+          formatter: (params: any) => {
+            const rel = params?.data?._relation || "关系";
+            return EDGE_LABEL[rel] || rel;
+          },
+          fontSize: 9,
+          color: MUTE,
+          backgroundColor: "rgba(255,255,255,0.85)",
+          padding: [1, 3],
+          borderRadius: 3,
+        },
+        labelLayout: { hideOverlap: true },
         cursor: "pointer",
       },
     ],
