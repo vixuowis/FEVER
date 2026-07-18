@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Beaker, MessageSquareText, Plus, Trash2, Users, Wrench } from "lucide-react";
+import { Beaker, MessageSquareText, PanelLeftClose, PanelLeftOpen, Plus, Trash2, Users, Wrench } from "lucide-react";
 import { relTime, cls } from "../utils";
 import { useStore } from "../store";
 import { VERSION } from "../version";
 
-/** 左栏：logo + 新研究 + case 列表 + 底部技能/团队入口 */
+/** 左栏：logo + 新研究 + case 列表 + 底部技能/团队入口。
+ *  支持折叠为 w-11 细栏（与右栏对称）：保留 logo 缩写 / 新研究 / 案例计数 / 底部 tab 入口。 */
 export default function Sidebar() {
   const cases = useStore((s) => s.cases);
   const currentCaseId = useStore((s) => s.currentCaseId);
@@ -14,6 +15,8 @@ export default function Sidebar() {
   const setRightTab = useStore((s) => s.setRightTab);
   const rightTab = useStore((s) => s.rightTab);
   const setRightOpen = useStore((s) => s.setRightOpen);
+  const leftOpen = useStore((s) => s.leftOpen);
+  const setLeftOpen = useStore((s) => s.setLeftOpen);
   const streaming = useStore((s) => s.streaming);
   const pendingLogicCount = useStore(
     (s) => s.logicLibrary.filter((x) => x.status === "pending").length,
@@ -25,15 +28,101 @@ export default function Sidebar() {
     setRightOpen(true);
   };
 
+  // 折叠态：细栏
+  if (!leftOpen) {
+    return (
+      <aside className="flex h-full w-11 shrink-0 flex-col items-center gap-1 border-r border-edge bg-[#F4F2EE] py-2">
+        <button
+          onClick={() => setLeftOpen(true)}
+          title="展开侧栏"
+          className="rounded-lg p-2 text-mute transition-colors hover:bg-card hover:text-ink"
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+        <div className="my-1 h-px w-6 bg-edge" />
+        {/* logo 缩写 */}
+        <div
+          className="font-serif text-[15px] font-bold text-ink"
+          title={`FEVER · ${VERSION}`}
+        >
+          F
+        </div>
+        {/* 新研究 */}
+        <button
+          onClick={newCase}
+          title="新研究"
+          className="rounded-lg p-2 text-brand transition-colors hover:bg-card"
+        >
+          <Plus size={16} />
+        </button>
+        {/* 案例计数 */}
+        {cases.length > 0 && (
+          <span
+            className="rounded-full bg-brand-soft px-1.5 text-[9.5px] font-semibold text-brand"
+            title={`${cases.length} 个研究案例`}
+          >
+            {cases.length}
+          </span>
+        )}
+        <div className="flex-1" />
+        {/* 底部 tab 入口（与右栏折叠态对齐） */}
+        <button
+          onClick={() => goTab("skills")}
+          title="技能"
+          className={cls(
+            "rounded-lg p-2 transition-colors",
+            rightTab === "skills" ? "bg-card text-jade shadow-card" : "text-mute hover:bg-card hover:text-ink",
+          )}
+        >
+          <Wrench size={14} />
+        </button>
+        <button
+          onClick={() => goTab("team")}
+          title="团队"
+          className={cls(
+            "rounded-lg p-2 transition-colors",
+            rightTab === "team" ? "bg-card text-jade shadow-card" : "text-mute hover:bg-card hover:text-ink",
+          )}
+        >
+          <Users size={14} />
+        </button>
+        <button
+          onClick={() => goTab("logic")}
+          title={`逻辑库${pendingLogicCount > 0 ? ` · ${pendingLogicCount} 条待验证` : ""}`}
+          className={cls(
+            "relative rounded-lg p-2 transition-colors",
+            rightTab === "logic" ? "bg-card text-jade shadow-card" : "text-mute hover:bg-card hover:text-ink",
+          )}
+        >
+          <Beaker size={14} />
+          {pendingLogicCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-3 min-w-[12px] items-center justify-center rounded-full bg-brand px-1 text-[8.5px] font-semibold text-card">
+              {pendingLogicCount}
+            </span>
+          )}
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="flex h-full w-[260px] shrink-0 flex-col border-r border-edge bg-[#F4F2EE]">
       {/* Logo */}
-      <div className="px-5 pb-4 pt-5">
-        <div className="flex items-baseline gap-2">
-          <h1 className="font-serif text-[22px] font-bold tracking-wide text-ink">FEVER</h1>
-          <span className="rounded bg-jade-soft px-1.5 py-px text-[10px] font-semibold text-jade">{VERSION}</span>
+      <div className="flex items-start justify-between px-5 pb-4 pt-5">
+        <div>
+          <div className="flex items-baseline gap-2">
+            <h1 className="font-serif text-[22px] font-bold tracking-wide text-ink">FEVER</h1>
+            <span className="rounded bg-jade-soft px-1.5 py-px text-[10px] font-semibold text-jade">{VERSION}</span>
+          </div>
+          <p className="mt-0.5 font-serif text-[11.5px] italic text-mute">Financial Event Research</p>
         </div>
-        <p className="mt-0.5 font-serif text-[11.5px] italic text-mute">Financial Event Research</p>
+        <button
+          onClick={() => setLeftOpen(false)}
+          title="折叠侧栏"
+          className="rounded-lg p-1.5 text-faint transition-colors hover:bg-card hover:text-ink"
+        >
+          <PanelLeftClose size={15} />
+        </button>
       </div>
 
       {/* 新研究 */}
