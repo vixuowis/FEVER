@@ -2,7 +2,7 @@
 
 修订: 改为串行执行 experts，避免并发 reasoning_content 交错污染前端。
 新增: 5) extract —— 从最终结论中抽取「待验证推演」作为研究逻辑库条目。
-新增: argus_navigator 作为专家（深度研究者），跑前 attach 证据图、跑后 export 为图谱 artifact。
+新增: deep_researcher 作为专家（基于证据图的多轮研究），跑前 attach 证据图、跑后 export 为图谱 artifact。
 """
 from __future__ import annotations
 
@@ -15,18 +15,18 @@ from ..skills.evidence_graph import (
 )
 from .roster import AGENTS, get_agent, system_prompt
 
-EXPERT_IDS = ["event_scout", "market_analyst", "fundamentals_analyst", "argus_navigator"]
+EXPERT_IDS = ["event_scout", "market_analyst", "fundamentals_analyst", "deep_researcher"]
 
 PLANNER_INSTRUCTION = """你是任务规划器。把用户问题拆成 2~4 个子任务，每个子任务指定一个专家 Agent：
 - event_scout（事件猎手：新闻/公告/快讯检索，筛高影响事件）
 - market_analyst（行情分析师：K线/指数/板块/龙虎榜/融资融券/事件研究）
 - fundamentals_analyst（基本面分析师：财务摘要/财务指标/研报评级/宏观）
-- argus_navigator（深度研究者：基于证据图的多轮研究 — 适合需要从多个数据源反复验证假设的复杂问题；
+- deep_researcher（深度研究者：基于证据图的多轮研究 — 适合需要从多个数据源反复验证假设的复杂问题；
   会把研究过程沉淀为一张可回看的证据图谱作为产出物。问题较深、可量化、可分多轮验证时优先用；单纯广度检索交给 event_scout）
 严格输出 JSON：{"tasks": [{"agent": "<id>", "task": "<具体子问题，含标的与时间范围>"}]}
 同一个专家最多出现一次；任务之间尽量不重叠。
-当问题涉及「原因拆解/假设验证/多源交叉」时，可以单独只派 argus_navigator（不开其他 expert）；
-反之纯事实/快讯类问题不必派 argus_navigator。"""
+当问题涉及「原因拆解/假设验证/多源交叉」时，可以单独只派 deep_researcher（不开其他 expert）；
+反之纯事实/快讯类问题不必派 deep_researcher。"""
 
 HYPOTHESIS_EXTRACT_INSTRUCTION = """你是「研究逻辑提炼员」。从下面的研究结论中抽取**待市场验证的推演/假设/情景/条件预测**（不是已经成立的事实）。
 
@@ -90,15 +90,15 @@ async def _run_expert_serial(
 ) -> AsyncIterator[dict]:
     """单 expert 串行执行：agent_start → events → agent_done 收尾。失败也收尾。
 
-    对 argus_navigator：进入前 attach 一张新证据图（ContextVar 持有），
-    navigator 的多次 tool call 之间图状态自动累积；退出时 detach 并把图作为
+    对 deep_researcher：进入前 attach 一张新证据图（ContextVar 持有），
+    deep_researcher 的多次 tool call 之间图状态自动累积；退出时 detach 并把图作为
     graph artifact 落库。
     """
     yield {"type": "agent_step", "phase": "agent_start", "agent": agent_id, "note": task_text}
     expert_state: dict[str, Any] = {"content": "", "tool_trace": [], "rounds": 0}
     token = None
     graph: EvidenceGraph | None = None
-    if agent_id == "argus_navigator":
+    if agent_id == "deep_researcher":
         graph = EvidenceGraph(question=question, scope=task_text[:200])
         token = eg_attach(graph)
     try:
@@ -113,8 +113,8 @@ async def _run_expert_serial(
                                   max_rounds=config.TEAM_MAX_ROUNDS):
             yield ev
         findings = expert_state["content"].strip()
-        # argus_navigator 收尾：若 LLM 没显式 export，把当前图强制导出为图谱 artifact
-        if agent_id == "argus_navigator" and graph is not None:
+        # deep_researcher 收尾：若 LLM 没显式 export，把当前图强制导出为图谱 artifact
+        if agent_id == "deep_researcher" and graph is not None:
             try:
                 cur = get_current_graph()
                 if cur is not None and (cur.nodes or cur.edges):
@@ -122,8 +122,8 @@ async def _run_expert_serial(
                     row = await artifact_store("graph", "证据图", payload)
                     yield {"type": "artifact", "agent": agent_id, "artifact": row}
                     expert_state["tool_trace"].append({
-                        "type": "tool", "agent": agent_id, "id": "argus_graph_export",
-                        "skill": "eg_export", "args": {"format": "markdown"},
+                        "type": "tool", "agent": agent_id, "id": "evidence_graph_export",
+                        "skill": "evidence_graph", "args": {"action": "export"},
                         "ok": True, "preview": f"导出图谱 {payload['stats']}",
                         "artifact_ids": [row.get("id")],
                     })
@@ -142,7 +142,7 @@ async def _run_expert_serial(
                         expert_state["content"] += tail
             except Exception as e:  # noqa: BLE001
                 yield {"type": "thinking", "agent": agent_id,
-                       "delta": f"\n[argus 导出图谱失败: {type(e).__name__}: {e}]\n"}
+                       "delta": f"\n[deep_researcher 导出图谱失败: {type(e).__name__}: {e}]\n"}
         yield {"type": "agent_step", "phase": "agent_done", "agent": agent_id,
                "note": _short_summary(findings)}
         yield {"type": "agent_findings", "agent": agent_id, "findings": findings[:600],

@@ -71,7 +71,7 @@ def _keep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("holders")
 def get_main_holders(symbol: str, limit: int = 20) -> dict:
     try:
@@ -110,7 +110,7 @@ def get_main_holders(symbol: str, limit: int = 20) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("holders")
 def get_circulate_holders(symbol: str, limit: int = 10) -> dict:
     try:
@@ -148,7 +148,7 @@ def get_circulate_holders(symbol: str, limit: int = 10) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("holders")
 def get_fund_holders(symbol: str, limit: int = 30) -> dict:
     try:
@@ -186,7 +186,7 @@ def get_fund_holders(symbol: str, limit: int = 30) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("holders")
 def get_holder_change(symbol: str, limit: int = 20) -> dict:
     try:
@@ -222,7 +222,7 @@ def get_holder_change(symbol: str, limit: int = 20) -> dict:
         },
         "required": [],
     },
-)
+    internal=True,)
 @cache.cached("restricted")
 def get_restricted_release_summary(limit: int = 10) -> dict:
     try:
@@ -259,7 +259,7 @@ def get_restricted_release_summary(limit: int = 10) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 def get_restricted_release_detail(symbol: str, start_date: Optional[str] = None,
                                   end_date: Optional[str] = None, limit: int = 30) -> dict:
     try:

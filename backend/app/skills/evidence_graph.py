@@ -1,31 +1,32 @@
-"""证据图 (Evidence Graph) 操作技能（Argus 范式的"图"层）。
+"""证据图 (Evidence Graph) 操作技能 —— 三层模型下唯一的「图」层 Skill。
 
 设计要点
 ========
 
-1. 状态通过 `ContextVar` 持有 —— 团队编排层 (`team.py`) 在调用 argus_navigator
+1. 状态通过 `ContextVar` 持有 —— 团队编排层 (`team.py`) 在调用 deep_researcher
    agent 前用 `eg_attach(graph)` 绑定一张新图，run 结束自动 detach。
-   这样图状态能在 navigator agent 多次 tool call 之间持久化，
+   这样图状态能在 deep_researcher agent 多次 tool call 之间持久化，
    而无需在 `run_agent` 或 skill schema 上动外科手术。
 
-2. 所有 `eg_*` skill 都是图上的原子操作，由 navigator LLM 自由组合：
-   - eg_add_evidence   —— 添加 evidence 节点（来源 = akshare skill 调用结果）
-   - eg_add_claim      —— 添加 claim 节点（可证伪陈述）
-   - eg_link           —— 把 claim 链到 evidence（supports/contradicts/context）
-   - eg_set_claim_status —— 修改 claim 状态
-   - eg_merge_claims   —— 合并重复 claim
-   - eg_add_missing    —— 记录尚未覆盖的研究面（用于下一轮 follow-up）
-   - eg_set_sufficient —— 标记图已充分（终止信号）
-   - eg_export         —— 导出图（默认 markdown 摘要 + JSON）
-   - eg_clear          —— 重置图（保留 question/scope，清空节点）
+2. 暴露给 LLM 的只有一个 **composite skill** ``evidence_graph``，由它 dispatcher
+   到 9 个 ``_eg_*`` sub-tool（internal=True，LLM 不可见）：
+   - _eg_add_evidence   —— 添加 evidence 节点（来源 = composite skill 返回的数据）
+   - _eg_add_claim      —— 添加 claim 节点（可证伪陈述）
+   - _eg_link           —— 把 claim 链到 evidence（supports/contradicts/context）
+   - _eg_set_claim_status —— 修改 claim 状态
+   - _eg_merge_claims   —— 合并重复 claim
+   - _eg_add_missing    —— 记录尚未覆盖的研究面（用于下一轮 follow-up）
+   - _eg_set_sufficient —— 标记图已充分（终止信号）
+   - _eg_export         —— 导出图（默认 markdown 摘要 + JSON）
+   - _eg_clear          —— 重置图（保留 question/scope，清空节点）
 
 3. 图同时作为产出物 (artifact kind='graph') 落库，payload 含：
    {nodes, edges, missing, sufficient, stats, markdown}
    前端用现有 markdown 渲染或 DataTable 即可呈现；未来可换专用 GraphView。
 
-4. navigator agent 自身也是「消费者」——它会先调 akshare 类 skill 拿数据，
-   再调 eg_add_evidence 把结果塞进图。所以 navigator 的 skills 列表
-   既包含所有 eg_* 也包含它能用的 akshare skill。
+4. deep_researcher agent 自身也是「消费者」——它会先调 composite skill 拿数据，
+   再调 evidence_graph(action="add_evidence") 把结果塞进图。所以 deep_researcher
+   的 skills 列表 = 一组数据 composite + 一个 evidence_graph composite。
 """
 from __future__ import annotations
 
@@ -41,7 +42,7 @@ from .registry import err, meta, ok, skill
 # ---------------------------------------------------------------- state ---
 
 _CURRENT_GRAPH: contextvars.ContextVar[Optional["EvidenceGraph"]] = contextvars.ContextVar(
-    "argus_graph", default=None
+    "evidence_graph_var", default=None
 )
 
 
@@ -65,7 +66,7 @@ def _current_or_none() -> Optional["EvidenceGraph"]:
 def _require_graph() -> "EvidenceGraph":
     g = _CURRENT_GRAPH.get()
     if g is None:
-        raise ValueError("当前没有 attach 证据图；请团队编排层在 navigator agent 启动前 eg_attach(EvidenceGraph(...))")
+        raise ValueError("当前没有 attach 证据图；请团队编排层在 deep_researcher agent 启动前 eg_attach(EvidenceGraph(...))")
     return g
 
 
@@ -363,8 +364,8 @@ def _new_gid() -> str:
 
 # ---------------------------------------------------------------- skills ---
 
-# 注意：所有 eg_* skill 的 handler 都通过 _require_graph() 从 ContextVar 拿图。
-# 这样 navigator 多次 tool call 之间图状态自动累积，无需在 skill signature 上
+# 注意：所有 _eg_* sub-tool 的 handler 都通过 _require_graph() 从 ContextVar 拿图。
+# 这样 deep_researcher agent 多次 tool call 之间图状态自动累积，无需在 skill signature 上
 # 多塞一个 graph_id 参数。
 
 _DEFAULT_PARAMS_BASE = {
@@ -382,7 +383,7 @@ def _params(props: dict, required: list[str]) -> dict:
 
 
 @skill(
-    "eg_add_evidence",
+    "_eg_add_evidence",
     "向当前证据图添加一条 evidence 节点（通常来自 akshare 类技能的取数结果）。"
     "source_kind 写 'akshare' 或 'inference'，source_ref 写源参数或 URL，"
     "title 一句话标题，summary 是对数据内容的事实摘要（不含主观判断），"
@@ -397,8 +398,9 @@ def _params(props: dict, required: list[str]) -> dict:
         },
         ["source_kind", "source_ref", "title", "summary"],
     ),
+    internal=True,
 )
-def eg_add_evidence(source_kind: str, source_ref: str, title: str,
+def _eg_add_evidence(source_kind: str, source_ref: str, title: str,
                     summary: str, raw: dict | None = None) -> dict:
     try:
         g = _require_graph()
@@ -422,11 +424,11 @@ def eg_add_evidence(source_kind: str, source_ref: str, title: str,
             meta("evidence_graph", 1),
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_add_evidence 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_add_evidence 失败: {type(e).__name__}: {e}")
 
 
 @skill(
-    "eg_add_claim",
+    "_eg_add_claim",
     "向当前证据图添加一条 claim 节点（一个可证伪的陈述或假设）。"
     "status 默认 exploring，可选 verified/rejected/needs_more/insufficient。"
     "confidence 是 0~1 之间的初始确信度。返回 claim_id。",
@@ -440,8 +442,8 @@ def eg_add_evidence(source_kind: str, source_ref: str, title: str,
         },
         ["claim"],
     ),
-)
-def eg_add_claim(claim: str, rationale: str = "", status: str = "exploring",
+    internal=True,)
+def _eg_add_claim(claim: str, rationale: str = "", status: str = "exploring",
                  confidence: float = 0.5) -> dict:
     try:
         g = _require_graph()
@@ -454,11 +456,11 @@ def eg_add_claim(claim: str, rationale: str = "", status: str = "exploring",
             meta("evidence_graph", 1),
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_add_claim 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_add_claim 失败: {type(e).__name__}: {e}")
 
 
 @skill(
-    "eg_link",
+    "_eg_link",
     "把 evidence 链到 claim 上，标注关系 supports / contradicts / context / addresses。"
     "claim_id 和 evidence_id 都来自之前 eg_add_claim / eg_add_evidence 的返回。",
     _params(
@@ -471,8 +473,8 @@ def eg_add_claim(claim: str, rationale: str = "", status: str = "exploring",
         },
         ["claim_id", "evidence_id"],
     ),
-)
-def eg_link(claim_id: str, evidence_id: str, relation: str = "supports",
+    internal=True,)
+def _eg_link(claim_id: str, evidence_id: str, relation: str = "supports",
             note: str = "") -> dict:
     try:
         g = _require_graph()
@@ -485,11 +487,11 @@ def eg_link(claim_id: str, evidence_id: str, relation: str = "supports",
             meta("evidence_graph", 1),
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_link 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_link 失败: {type(e).__name__}: {e}")
 
 
 @skill(
-    "eg_set_claim_status",
+    "_eg_set_claim_status",
     "更新 claim 的状态（verified/rejected/needs_more/insufficient）和确信度。"
     "当 claim 已被充分 evidence 支持/反驳时调用。",
     _params(
@@ -502,8 +504,8 @@ def eg_link(claim_id: str, evidence_id: str, relation: str = "supports",
         },
         ["claim_id", "status"],
     ),
-)
-def eg_set_claim_status(claim_id: str, status: str, confidence: float | None = None,
+    internal=True,)
+def _eg_set_claim_status(claim_id: str, status: str, confidence: float | None = None,
                         rationale: str = "") -> dict:
     try:
         g = _require_graph()
@@ -517,11 +519,11 @@ def eg_set_claim_status(claim_id: str, status: str, confidence: float | None = N
             meta("evidence_graph", 1),
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_set_claim_status 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_set_claim_status 失败: {type(e).__name__}: {e}")
 
 
 @skill(
-    "eg_merge_claims",
+    "_eg_merge_claims",
     "合并重复/相似的 claim 节点：保留 keep_id，把 merge_ids 列表里的节点合并进来，"
     "并把它们的入边/出边转移到 keep_id。canonical 是合并后的统一陈述。",
     _params(
@@ -534,8 +536,8 @@ def eg_set_claim_status(claim_id: str, status: str, confidence: float | None = N
         },
         ["keep_id", "merge_ids", "canonical_claim"],
     ),
-)
-def eg_merge_claims(keep_id: str, merge_ids: list, canonical_claim: str,
+    internal=True,)
+def _eg_merge_claims(keep_id: str, merge_ids: list, canonical_claim: str,
                     rationale: str = "") -> dict:
     try:
         g = _require_graph()
@@ -548,11 +550,11 @@ def eg_merge_claims(keep_id: str, merge_ids: list, canonical_claim: str,
             meta("evidence_graph", 1),
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_merge_claims 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_merge_claims 失败: {type(e).__name__}: {e}")
 
 
 @skill(
-    "eg_add_missing",
+    "_eg_add_missing",
     "记录尚未覆盖的研究面（用于自我反思 / 下一轮 follow-up）。"
     "priority 1~5（5 最重要），why_missing 说明为何这个面还没被覆盖。",
     _params(
@@ -563,8 +565,8 @@ def eg_merge_claims(keep_id: str, merge_ids: list, canonical_claim: str,
         },
         ["aspect", "why_missing"],
     ),
-)
-def eg_add_missing(aspect: str, why_missing: str, priority: int = 1) -> dict:
+    internal=True,)
+def _eg_add_missing(aspect: str, why_missing: str, priority: int = 1) -> dict:
     try:
         g = _require_graph()
     except ValueError as e:
@@ -576,11 +578,11 @@ def eg_add_missing(aspect: str, why_missing: str, priority: int = 1) -> dict:
             meta("evidence_graph", 1),
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_add_missing 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_add_missing 失败: {type(e).__name__}: {e}")
 
 
 @skill(
-    "eg_set_sufficient",
+    "_eg_set_sufficient",
     "标记当前图已充分（终止信号）。当你认为已经有足够 evidence + claim 闭环时调用。"
     "stop_reason 简要说明为何认为已充分。",
     _params(
@@ -590,8 +592,8 @@ def eg_add_missing(aspect: str, why_missing: str, priority: int = 1) -> dict:
         },
         ["sufficient"],
     ),
-)
-def eg_set_sufficient(sufficient: bool, stop_reason: str = "") -> dict:
+    internal=True,)
+def _eg_set_sufficient(sufficient: bool, stop_reason: str = "") -> dict:
     try:
         g = _require_graph()
     except ValueError as e:
@@ -604,11 +606,11 @@ def eg_set_sufficient(sufficient: bool, stop_reason: str = "") -> dict:
             meta("evidence_graph", 1),
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_set_sufficient 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_set_sufficient 失败: {type(e).__name__}: {e}")
 
 
 @skill(
-    "eg_export",
+    "_eg_export",
     "导出当前图为 markdown 摘要 + JSON。当你认为研究完成时调用一次，"
     "会作为 artifact 落库并展示给用户。format 默认 markdown。",
     _params(
@@ -618,8 +620,8 @@ def eg_set_sufficient(sufficient: bool, stop_reason: str = "") -> dict:
         },
         [],
     ),
-)
-def eg_export(format: str = "markdown") -> dict:
+    internal=True,)
+def _eg_export(format: str = "markdown") -> dict:
     try:
         g = _require_graph()
     except ValueError as e:
@@ -648,16 +650,16 @@ def eg_export(format: str = "markdown") -> dict:
             artifact=artifact,
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_export 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_export 失败: {type(e).__name__}: {e}")
 
 
 @skill(
-    "eg_clear",
+    "_eg_clear",
     "重置当前图（保留 question/scope，清空所有节点和边）。"
     "用于研究路线跑偏需要重新开始时。",
     _params({}, []),
-)
-def eg_clear() -> dict:
+    internal=True,)
+def _eg_clear() -> dict:
     try:
         g = _require_graph()
     except ValueError as e:
@@ -669,4 +671,4 @@ def eg_clear() -> dict:
             meta("evidence_graph", 0),
         )
     except Exception as e:  # noqa: BLE001
-        return err(f"eg_clear 失败: {type(e).__name__}: {e}")
+        return err(f"_eg_clear 失败: {type(e).__name__}: {e}")

@@ -87,7 +87,7 @@ def _pick_period(df: pd.DataFrame, n: int = 8) -> pd.DataFrame:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("fundamentals")
 def get_income_statement(symbol: str, periods: int = 8) -> dict:
     try:
@@ -123,7 +123,7 @@ def get_income_statement(symbol: str, periods: int = 8) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("fundamentals")
 def get_balance_sheet(symbol: str, periods: int = 8) -> dict:
     try:
@@ -160,7 +160,7 @@ def get_balance_sheet(symbol: str, periods: int = 8) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("fundamentals")
 def get_cash_flow(symbol: str, periods: int = 8) -> dict:
     try:
@@ -194,7 +194,7 @@ def get_cash_flow(symbol: str, periods: int = 8) -> dict:
         "properties": {"symbol": {"type": "string", "description": "6位股票代码"}},
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("profit_forecast")
 def get_profit_forecast(symbol: str) -> dict:
     try:

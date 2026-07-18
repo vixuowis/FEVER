@@ -32,6 +32,7 @@ def _clip(s, n=150):
         },
         "required": ["symbol"],
     },
+    internal=True,
 )
 @cache.cached("news")
 def get_stock_news(symbol: str, limit: int = 8) -> dict:
@@ -71,6 +72,7 @@ def get_stock_news(symbol: str, limit: int = 8) -> dict:
         "properties": {"limit": {"type": "integer", "description": "条数，≤20，默认 15"}},
         "required": [],
     },
+    internal=True,
 )
 @cache.cached("news")
 def get_global_news(limit: int = 15) -> dict:
@@ -129,6 +131,7 @@ def get_global_news(limit: int = 15) -> dict:
         },
         "required": [],
     },
+    internal=True,
 )
 def get_announcements(date: Optional[str] = None, keyword: Optional[str] = None) -> dict:
     try:

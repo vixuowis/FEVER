@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 from openai import AsyncOpenAI
 
 from . import config
-from .skills.registry import REGISTRY, ensure_skills_loaded, serialize_tool_result, tool_schema_subset
+from .skills.registry import REGISTRY, ensure_skills_loaded, serialize_tool_result, tool_schema_subset, tools_for_agent
 
 _client: Optional[AsyncOpenAI] = None
 
@@ -36,12 +36,21 @@ async def noop_artifact_store(kind: str, title: str, payload: Any) -> dict:
 
 
 async def execute_skill(name: str, args: dict) -> dict:
-    """Run a skill handler in a thread with timeout; never raises."""
+    """Run a skill handler with timeout; never raises.
+
+    Supports both sync and async handlers:
+    - async handler: 直接 await（composite skill 内部 await sub-skill）
+    - sync handler:  to_thread 跑（保持原行为）
+    """
     ensure_skills_loaded()
     sd = REGISTRY.get(name)
     if sd is None:
         return {"ok": False, "error": f"未知技能: {name}"}
     try:
+        if asyncio.iscoroutinefunction(sd.handler):
+            return await asyncio.wait_for(
+                sd.handler(**args), timeout=config.SKILL_TIMEOUT
+            )
         return await asyncio.wait_for(
             asyncio.to_thread(sd.handler, **args), timeout=config.SKILL_TIMEOUT
         )
@@ -88,7 +97,9 @@ async def run_agent(
     state (mutated): {"content": str, "tool_trace": [..], "rounds": int}
     """
     ensure_skills_loaded()
-    tools = tool_schema_subset(agent_def.get("skills", []))
+    # 三层模型：自动过滤 internal=True 的 atomic skill（LLM 不可见）
+    # composite skill 走 LLM 可见
+    tools = tools_for_agent(agent_def.get("skills", []) or agent_id)
     client = get_client()
 
     for round_no in range(1, max_rounds + 1):

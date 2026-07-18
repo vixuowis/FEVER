@@ -50,16 +50,26 @@ export const SKILL_CN: Record<string, string> = {
   get_convert_bond_spot: "可转债实时",
   get_us_index_daily: "美股指数K线",
   get_index_list: "全球指数列表",
-  // 证据图（Argus 范式）
-  eg_add_evidence: "添加证据",
-  eg_add_claim: "添加推论",
-  eg_link: "链接证据↔推论",
-  eg_set_claim_status: "更新推论状态",
-  eg_merge_claims: "合并推论",
-  eg_add_missing: "记录研究缺口",
-  eg_set_sufficient: "标记研究充分",
-  eg_export: "导出证据图",
-  eg_clear: "重置证据图",
+  // 证据图（composite skill：1 个对外 + 9 个 _eg_* sub-tool，sub-tool 不暴露给前端）
+  evidence_graph: "证据图操作",
+  // 复合 skill（composite）—— LLM 可见的高层能力
+  stock_overview: "股票概览",
+  market_research: "行情综合研究",
+  financial_research: "财务综合研究",
+  news_intel: "资讯情报",
+  holder_research: "股东综合研究",
+  macro_intel: "宏观情报",
+  event_study_skill: "事件研究（CAR）",
+  // _eg_* sub-tool（internal，LLM 不可见；仅留中文名以备将来展示 trace）
+  _eg_add_evidence: "添加证据",
+  _eg_add_claim: "添加推论",
+  _eg_link: "链接证据↔推论",
+  _eg_set_claim_status: "更新推论状态",
+  _eg_merge_claims: "合并推论",
+  _eg_add_missing: "记录研究缺口",
+  _eg_set_sufficient: "标记研究充分",
+  _eg_export: "导出证据图",
+  _eg_clear: "重置证据图",
 };
 
 export function skillCn(name: string): string {

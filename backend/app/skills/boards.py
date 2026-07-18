@@ -69,7 +69,7 @@ def _keep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
         },
         "required": [],
     },
-)
+    internal=True,)
 @cache.cached("industry_boards")
 def list_industry_boards(sort_by: str = "涨跌幅", limit: int = 30) -> dict:
     try:
@@ -105,7 +105,7 @@ def list_industry_boards(sort_by: str = "涨跌幅", limit: int = 30) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("board_history")
 def get_industry_board_history(symbol: str, period: str = "日k", limit: int = 250) -> dict:
     try:
@@ -151,7 +151,7 @@ def get_industry_board_history(symbol: str, period: str = "日k", limit: int = 2
         },
         "required": [],
     },
-)
+    internal=True,)
 @cache.cached("fund_flow_rank")
 def get_sector_fund_flow_rank(board_type: str = "industry", limit: int = 30) -> dict:
     try:
@@ -194,7 +194,7 @@ def get_sector_fund_flow_rank(board_type: str = "industry", limit: int = 30) -> 
         },
         "required": [],
     },
-)
+    internal=True,)
 @cache.cached("board_change")
 def get_board_change(limit: int = 50, sort_by: str = "涨跌幅") -> dict:
     try:
@@ -230,7 +230,7 @@ def get_board_change(limit: int = 50, sort_by: str = "涨跌幅") -> dict:
         "properties": {"symbol": {"type": "string", "description": "行业板块名（非股票代码），如 半导体/银行"}},
         "required": ["symbol"],
     },
-)
+    internal=True,)
 @cache.cached("industry_info")
 def get_stock_industry_info(symbol: str) -> dict:
     try:

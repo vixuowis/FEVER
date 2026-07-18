@@ -51,7 +51,7 @@ def _fetch_stock_close(sym: str, start8: str, end8: str) -> tuple[pd.DataFrame, 
         },
         "required": ["symbol", "event_date"],
     },
-)
+    internal=True,)
 def event_study(symbol: str, event_date: str, pre: int = 20, post: int = 20,
                 index_symbol: str = "sh000300") -> dict:
     try:

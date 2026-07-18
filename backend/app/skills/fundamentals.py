@@ -40,7 +40,7 @@ def _table_artifact(title: str, records: list[dict], note: str | None = None) ->
         "properties": {"symbol": {"type": "string", "description": "6位股票代码"}},
         "required": ["symbol"],
     },
-)
+    internal=True,)
 def get_financial_abstract(symbol: str) -> dict:
     try:
         code = _code6(symbol)
@@ -85,7 +85,7 @@ def get_financial_abstract(symbol: str) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 def get_financial_indicator(symbol: str, start_year: Optional[str] = None) -> dict:
     try:
         code = _code6(symbol)
@@ -120,7 +120,7 @@ def get_financial_indicator(symbol: str, start_year: Optional[str] = None) -> di
         "properties": {"symbol": {"type": "string", "description": "6位股票代码"}},
         "required": ["symbol"],
     },
-)
+    internal=True,)
 def get_research_reports(symbol: str) -> dict:
     try:
         code = _code6(symbol)
@@ -155,7 +155,7 @@ def get_research_reports(symbol: str) -> dict:
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_lhb(start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict:
     try:
         end8 = norm_date(end_date, date.today())
@@ -189,7 +189,7 @@ def get_lhb(start_date: Optional[str] = None, end_date: Optional[str] = None) ->
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_margin(start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict:
     try:
         end8 = norm_date(end_date, date.today())
@@ -225,7 +225,7 @@ def get_margin(start_date: Optional[str] = None, end_date: Optional[str] = None)
         },
         "required": ["indicator"],
     },
-)
+    internal=True,)
 def get_macro(indicator: str) -> dict:
     try:
         ind = (indicator or "").strip().lower()

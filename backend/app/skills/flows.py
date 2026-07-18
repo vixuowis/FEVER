@@ -61,7 +61,7 @@ def _keep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
         },
         "required": [],
     },
-)
+    internal=True,)
 @cache.cached("fund_flow")
 def get_industry_fund_flow(sort_by: str = "净额", limit: int = 30) -> dict:
     try:
@@ -97,7 +97,7 @@ def get_industry_fund_flow(sort_by: str = "净额", limit: int = 30) -> dict:
         },
         "required": [],
     },
-)
+    internal=True,)
 @cache.cached("fund_flow")
 def get_concept_fund_flow(sort_by: str = "净额", limit: int = 30) -> dict:
     try:
@@ -132,7 +132,7 @@ def get_concept_fund_flow(sort_by: str = "净额", limit: int = 30) -> dict:
         },
         "required": [],
     },
-)
+    internal=True,)
 @cache.cached("fund_flow")
 def get_individual_fund_flow_rank(limit: int = 30) -> dict:
     try:
@@ -179,7 +179,7 @@ def get_individual_fund_flow_rank(limit: int = 30) -> dict:
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_big_deal_flow(symbol: Optional[str] = None, limit: int = 50) -> dict:
     try:
         df = _with_retry(lambda: ak.stock_fund_flow_big_deal())
@@ -214,7 +214,7 @@ def get_big_deal_flow(symbol: Optional[str] = None, limit: int = 50) -> dict:
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_hsgt_fund_flow(limit: int = 10) -> dict:
     try:
         df = _with_retry(lambda: ak.stock_hsgt_fund_flow_summary_em())

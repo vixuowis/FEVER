@@ -1,11 +1,29 @@
 """Skill registry: @skill decorator + REGISTRY (design.md §4).
 
-Every handler returns a unified dict:
-  {"ok": True, "data": ..., "meta": {...}, "artifact": {...}}   # or "artifacts": [...]
+三层调度模型（新增）
+====================
+
+- **Tool（atomic）**：单一原子操作，直接对接 akshare / DB / 内部 API。
+  默认对 LLM 不可见（`internal=True`），仅供 composite skill 内部调用。
+  例如：``get_stock_daily``、``_eg_add_evidence``。
+
+- **Skill（composite）**：可调度多个 tool 的复合能力，对 LLM 暴露为一个高层 tool。
+  例如：``market_research``（内部调 get_stock_daily / get_index_daily / get_industry_fund_flow …）、
+  ``evidence_graph``（dispatch 到 9 个 ``_eg_*`` sub-tool）。
+
+- **Agent**：调度 composite skill（不再直接调 atomic）。
+  例如：``deep_researcher`` 调 ``evidence_graph`` + 一组 research skill。
+
+- **Team**：调度不同 agent。
+
+LLM 视角下，agent 的 tools 列表只包含 composite + 白名单的 atomic。
+Atomic 默认 internal=True；composite 默认 internal=False。
+``tools_for_agent(agent_id)`` 会自动过滤掉 internal 的 atomic。
+
+每个 handler 仍然返回统一 dict：
+  {"ok": True, "data": ..., "meta": {...}, "artifact": {...} / "artifacts": [...]}
   {"ok": False, "error": "human readable"}
 """
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -18,6 +36,10 @@ class SkillDef:
     description: str
     parameters: dict[str, Any]
     handler: Callable[..., dict]
+    # 新增：分类
+    category: str = "atomic"          # "atomic" | "composite"
+    internal: bool = False            # True: LLM 不可见（仅可被 composite skill 或代码内调用）
+    composes: list[str] = field(default_factory=list)  # composite 时声明调用的 sub-skill
     emit_artifact: bool = field(default=True)
 
     def openai_tool(self) -> dict:
@@ -34,12 +56,24 @@ class SkillDef:
 REGISTRY: dict[str, SkillDef] = {}
 
 
-def skill(name: str, description: str, parameters: dict[str, Any]):
-    """Register a skill handler."""
+def skill(name: str, description: str, parameters: dict[str, Any],
+          *, category: str = "atomic", internal: bool = False, composes: list[str] | None = None):
+    """Register a skill handler.
+
+    Args:
+        name: skill id (e.g. "market_research" / "_eg_add_evidence")
+        description: 一句话描述（暴露给 LLM）
+        parameters: JSON schema
+        category: "atomic" (默认) / "composite"
+        internal: True 时 LLM 不可见（atomic 默认 False 保持后向兼容；新建 atomic 建议 True）
+        composes: composite 模式下声明它调用的 sub-skill id 列表（仅做文档/校验用）
+    """
 
     def deco(fn: Callable[..., dict]):
         REGISTRY[name] = SkillDef(
-            name=name, description=description, parameters=parameters, handler=fn
+            name=name, description=description, parameters=parameters, handler=fn,
+            category=category, internal=internal,
+            composes=list(composes or []),
         )
         return fn
 
@@ -138,10 +172,53 @@ def tool_schema_subset(names: list[str]) -> list[dict]:
     return [REGISTRY[n].openai_tool() for n in names if n in REGISTRY]
 
 
+def tools_for_agent(agent_id_or_skill_names, *, include_internal: bool = False) -> list[dict]:
+    """给某个 agent 看到的 tool schema 列表。
+
+    Args:
+        agent_id_or_skill_names: agent_id 字符串（查 roster），或 skill 名列表
+        include_internal: True 时不过滤 internal（仅给需要直接调 atomic 的 agent 用）
+
+    三层模型下，agent 默认只看 composite + 白名单 atomic。
+    """
+    from ..agents.roster import get_agent  # 延迟导入避免循环
+
+    if isinstance(agent_id_or_skill_names, str):
+        names = get_agent(agent_id_or_skill_names)["skills"]
+    else:
+        names = list(agent_id_or_skill_names)
+
+    out: list[dict] = []
+    for n in names:
+        sd = REGISTRY.get(n)
+        if sd is None:
+            continue
+        if not include_internal and sd.internal:
+            continue
+        out.append(sd.openai_tool())
+    return out
+
+
+def get_skill_meta(name: str) -> dict | None:
+    """返回 skill 的元信息（用于 /api/skills 等接口）。"""
+    sd = REGISTRY.get(name)
+    if sd is None:
+        return None
+    return {
+        "name": sd.name,
+        "description": sd.description,
+        "parameters": sd.parameters,
+        "category": sd.category,
+        "internal": sd.internal,
+        "composes": sd.composes,
+    }
+
+
 def ensure_skills_loaded() -> None:
     """Import skill modules so decorators run (idempotent)."""
     from . import (
         analysis, fundamentals, market, news,
         fundamentals_detail, boards, flows, holders, global_markets,
-        evidence_graph,
+        evidence_graph,  # 9 个 _eg_* sub-tool（被 composite evidence_graph 内部 dispatch）
+        composite,        # 8 个高层 composite skill
     )  # noqa: F401

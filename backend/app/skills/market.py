@@ -131,7 +131,7 @@ def _clean_ohlcv(df: pd.DataFrame, limit: int = 250) -> tuple[pd.DataFrame, bool
         "properties": {"keyword": {"type": "string", "description": "股票名称、简称或代码片段"}},
         "required": ["keyword"],
     },
-)
+    internal=True,)
 def search_stock(keyword: str) -> dict:
     try:
         resp = requests.get(
@@ -175,7 +175,7 @@ def search_stock(keyword: str) -> dict:
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 def get_stock_daily(symbol: str, start_date: Optional[str] = None,
                     end_date: Optional[str] = None, adjust: str = "qfq") -> dict:
     # 美股字母代码 → 转交美股 skill
@@ -231,7 +231,7 @@ def get_stock_daily(symbol: str, start_date: Optional[str] = None,
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 def get_us_stock_daily(symbol: str, start_date: Optional[str] = None,
                        end_date: Optional[str] = None, adjust: str = "qfq") -> dict:
     """美股日K（akshare.stock_us_daily 东方财富源）。start_date/end_date 接口不支持，按返回全量截取。"""
@@ -301,7 +301,7 @@ def get_us_stock_daily(symbol: str, start_date: Optional[str] = None,
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 def get_index_daily(symbol: str, start_date: Optional[str] = None,
                     end_date: Optional[str] = None) -> dict:
     try:
@@ -339,7 +339,7 @@ def get_index_daily(symbol: str, start_date: Optional[str] = None,
     "get_sector_spot",
     "获取新浪行业板块实时快照（板块、公司数、平均价、涨跌幅、总成交额、领涨股）。",
     {"type": "object", "properties": {}, "required": []},
-)
+    internal=True,)
 def get_sector_spot() -> dict:
     try:
         df = ak.stock_sector_spot(indicator="新浪行业")
@@ -374,7 +374,7 @@ def get_sector_spot() -> dict:
     "get_current_date",
     "返回服务器当前日期与时间（用于对齐「最近/今天」等相对时间表述）。",
     {"type": "object", "properties": {}, "required": []},
-)
+    internal=True,)
 def get_current_date() -> dict:
     now = datetime.now().astimezone()
     weekdays = "一二三四五六日"

@@ -168,7 +168,8 @@ def cached(profile: str = "default"):
     """装饰器：包装一个 skill handler，命中缓存直接返回。
 
     Usage:
-        @skill("list_industry_boards", ...)
+        @skill("list_industry_boards", ...,
+    internal=True,)
         @cache.cached("industry_boards")
         def list_industry_boards(...): ...
 

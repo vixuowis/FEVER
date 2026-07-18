@@ -81,7 +81,7 @@ def _resolve_us_index(symbol: str) -> str:
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_etf_spot(keyword: Optional[str] = None, sort_by: str = "涨跌幅", limit: int = 30) -> dict:
     try:
         df = _with_retry(lambda: ak.fund_etf_spot_em())
@@ -125,7 +125,7 @@ def get_etf_spot(keyword: Optional[str] = None, sort_by: str = "涨跌幅", limi
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_fund_value_estimation(keyword: Optional[str] = None, limit: int = 30) -> dict:
     try:
         df = _with_retry(lambda: ak.fund_value_estimation_em(symbol="全部"))
@@ -172,7 +172,7 @@ def get_fund_value_estimation(keyword: Optional[str] = None, limit: int = 30) ->
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_futures_main(symbol: Optional[str] = None, limit: int = 30) -> dict:
     try:
         df = _with_retry(lambda: ak.futures_main_sina(symbol="V0"))
@@ -207,7 +207,7 @@ def get_futures_main(symbol: Optional[str] = None, limit: int = 30) -> dict:
         "properties": {},
         "required": [],
     },
-)
+    internal=True,)
 def get_fx_spot_quote() -> dict:
     try:
         df = _with_retry(lambda: ak.fx_spot_quote())
@@ -238,7 +238,7 @@ def get_fx_spot_quote() -> dict:
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_convert_bond_spot(keyword: Optional[str] = None, limit: int = 30) -> dict:
     try:
         df = _with_retry(lambda: ak.bond_zh_hs_cov_spot())
@@ -283,7 +283,7 @@ def get_convert_bond_spot(keyword: Optional[str] = None, limit: int = 30) -> dic
         },
         "required": ["symbol"],
     },
-)
+    internal=True,)
 def get_us_index_daily(symbol: str, limit: int = 250) -> dict:
     try:
         sym = _resolve_us_index(symbol)
@@ -322,7 +322,7 @@ def get_us_index_daily(symbol: str, limit: int = 250) -> dict:
         },
         "required": [],
     },
-)
+    internal=True,)
 def get_index_list(keyword: Optional[str] = None, limit: int = 30) -> dict:
     try:
         df = _with_retry(lambda: ak.index_stock_info())
