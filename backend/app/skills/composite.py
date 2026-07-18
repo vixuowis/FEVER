@@ -26,6 +26,7 @@ import json
 from typing import Any
 
 from ..llm import execute_skill
+from .market import is_us_symbol
 from .registry import err, meta, ok, skill
 
 
@@ -288,15 +289,29 @@ async def financial_research(symbol: str, period: str = "annual") -> dict:
 async def news_intel(symbol: str | None = None,
                      kind: list[str] | None = None,
                      limit: int = 8) -> dict:
-    kind = kind or (["news", "announcement"] if symbol else ["global"])
-    code = "".join(ch for ch in str(symbol) if ch.isdigit())[-6:] if symbol else ""
+    raw_symbol = (symbol or "").strip()
+    us_stock = bool(raw_symbol) and is_us_symbol(raw_symbol)
+    code = "".join(ch for ch in raw_symbol if ch.isdigit())[-6:] if raw_symbol else ""
+    kind = kind or (["news", "announcement"] if code else ["global"])
     tasks: list[tuple[str, dict]] = []
-    if "news" in kind and code:
-        tasks.append(("get_stock_news", {"symbol": code, "limit": limit}))
+    notes: list[str] = []
+    if "news" in kind:
+        if code:
+            # A 股：调个股新闻
+            tasks.append(("get_stock_news", {"symbol": code, "limit": limit}))
+        elif us_stock:
+            # 美股：akshare.stock_news_em 仅支持 6 位 A 股代码，
+            # 改走全球快讯（akshare.stock_info_global_em），再让 LLM 自行过滤
+            tasks.append(("get_global_news", {"limit": limit * 2}))
+            notes.append(f"美股 {raw_symbol} 无个股新闻接口，已用全球快讯兜底")
     if "global" in kind:
         tasks.append(("get_global_news", {"limit": limit * 2}))
-    if "announcement" in kind and code:
-        tasks.append(("get_announcements", {"keyword": code, "limit": limit}))
+    if "announcement" in kind:
+        if code:
+            tasks.append(("get_announcements", {"keyword": code, "limit": limit}))
+        elif us_stock:
+            # 美股没有中文公告接口，跳过并提示
+            notes.append(f"美股 {raw_symbol} 无公告接口，已跳过 announcement")
     if not tasks:
         return err("kind 不能为空（至少要一个非空子集）")
 
@@ -304,14 +319,15 @@ async def news_intel(symbol: str | None = None,
     summary = _summarize_subs(results)
     summary["composed"] = [n for n, _ in tasks]
     return ok(
-        {"symbol": code or None, "kind": kind,
+        {"symbol": code or (raw_symbol or None), "kind": kind,
+         "market": "美股" if us_stock else ("A股" if code else "全局"),
          "sub_results": [{"skill": n, "ok": r.get("ok"),
                           "preview": _clip(str(r.get("data") or r.get("error")), 200)}
                          for (n, _), r in zip(tasks, results)],
          **summary},
         meta("news_intel", len(tasks)),
         artifacts=_collect_artifacts(results) or None,
-    )
+    ) | ({"note": "；".join(notes)} if notes else {})
 
 
 # ============================================================== holder_research
