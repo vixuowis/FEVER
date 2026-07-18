@@ -49,3 +49,6 @@ debug-homepage-stuck-events.md
 
 # Archives / prototypes (kept locally but not in VC)
 archive/
+
+# Runtime pids / logs (created by scripts/dev.sh)
+.run/
