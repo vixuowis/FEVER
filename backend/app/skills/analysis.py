@@ -3,6 +3,8 @@
 取事件日前后 [-pre, +post] 交易日的个股日K与指数日K（向前多取缓冲保证窗口），
 计算日收益 r_stock / r_index，AR_t = r_stock - r_index，CAR_t = ΣAR（自 -pre 起累计）。
 所有收益类字段单位：%（百分比）。
+
+支持 A 股（6 位代码 + 沪深 300 等指数）与 美股（ticker + SPY/QQQ 等 ETF）。
 """
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ from typing import Optional
 import akshare as ak
 import pandas as pd
 
-from .market import _clean_ohlcv, norm_date, norm_index_symbol, norm_symbol
+from .market import _clean_ohlcv, is_us_symbol, norm_date, norm_index_symbol, norm_symbol
 from .registry import err, meta, ok, skill
 
 
@@ -36,50 +38,76 @@ def _fetch_stock_close(sym: str, start8: str, end8: str) -> tuple[pd.DataFrame, 
     return df[["date", "close"]], src
 
 
+def _fetch_us_close(sym: str) -> tuple[pd.DataFrame, str]:
+    """美股日K（akshare.stock_us_daily）。返回 [date, close] + 数据源。"""
+    try:
+        df = ak.stock_us_daily(symbol=sym, adjust="qfq")
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"美股 {sym} 日K获取失败: {type(e).__name__}: {e}")
+    if df is None or len(df) == 0:
+        raise ValueError(f"美股 {sym} 无日K数据")
+    df, _ = _clean_ohlcv(df, limit=100000)
+    return df[["date", "close"]], "akshare.stock_us_daily"
+
+
+def _fetch_us_index_close(sym: str) -> tuple[pd.DataFrame, str]:
+    """美股指数 / ETF 当作「美股」用 stock_us_daily 取。返回 [date, close]。"""
+    return _fetch_us_close(sym)
+
+
 @skill(
     "event_study",
     "事件研究法：以事件日为 T0，计算窗口 [-pre,+post] 内个股相对指数的超额收益 AR 与累计超额收益 CAR，"
-    "并给出事件日前5日/后5日累计收益、CAR终值、事件日涨跌幅。收益单位%。",
+    "并给出事件日前5日/后5日累计收益、CAR终值、事件日涨跌幅。收益单位%。"
+    "支持 A 股（6 位代码）与 美股（ticker，A 股默认基准 sh000300，美股默认 SPY）。",
     {
         "type": "object",
         "properties": {
-            "symbol": {"type": "string", "description": "股票代码，如 600519 / sh600519"},
+            "symbol": {"type": "string", "description": "股票代码：A 股 6 位 / sh600519；美股 ticker AAPL / NVDA"},
             "event_date": {"type": "string", "description": "事件日 YYYYMMDD 或 YYYY-MM-DD"},
             "pre": {"type": "integer", "description": "事件前交易日数，默认20"},
             "post": {"type": "integer", "description": "事件后交易日数，默认20"},
-            "index_symbol": {"type": "string", "description": "基准指数，默认 sh000300(沪深300)"},
+            "index_symbol": {"type": "string", "description": "基准指数：A 股默认 sh000300(沪深300)；美股默认 SPY"},
         },
         "required": ["symbol", "event_date"],
     },
     internal=True,)
 def event_study(symbol: str, event_date: str, pre: int = 20, post: int = 20,
-                index_symbol: str = "sh000300") -> dict:
+                index_symbol: str = "") -> dict:
     try:
-        sym = norm_symbol(symbol)
-        idx_sym = norm_index_symbol(index_symbol or "sh000300")
-        pre = max(1, min(int(pre or 20), 60))
-        post = max(0, min(int(post or 20), 60))
         try:
             ev = datetime.strptime(norm_date(event_date), "%Y%m%d").date()
         except ValueError:
             return err(f"无法识别事件日: {event_date}")
-        today = date.today()
-        # 向前多取 60 天缓冲保证 pre 窗口；向后取到 min(今天, 事件+缓冲)
-        start8 = (ev - timedelta(days=pre * 2 + 60)).strftime("%Y%m%d")
-        end8 = min(today, ev + timedelta(days=post * 2 + 15)).strftime("%Y%m%d")
+        pre = max(1, min(int(pre or 20), 60))
+        post = max(0, min(int(post or 20), 60))
 
-        stock_df, src_stock = _fetch_stock_close(sym, start8, end8)
+        us = is_us_symbol(symbol)
+        if us:
+            sym = symbol.strip().upper()
+            idx_sym = (index_symbol or "SPY").strip().upper()
+            stock_df, src_stock = _fetch_us_close(sym)
+            idx_df, src_idx = _fetch_us_index_close(idx_sym)
+        else:
+            sym = norm_symbol(symbol)
+            idx_sym = norm_index_symbol(index_symbol or "sh000300")
+            # 向前多取 60 天缓冲保证 pre 窗口；向后取到 min(今天, 事件+缓冲)
+            start8 = (ev - timedelta(days=pre * 2 + 60)).strftime("%Y%m%d")
+            end8 = min(date.today(), ev + timedelta(days=post * 2 + 15)).strftime("%Y%m%d")
+            stock_df, src_stock = _fetch_stock_close(sym, start8, end8)
+            try:
+                idx_raw = ak.stock_zh_index_daily(symbol=idx_sym)
+            except Exception as e:  # noqa: BLE001
+                return err(f"基准指数 {idx_sym} 获取失败: {type(e).__name__}: {e}")
+            if idx_raw is None or len(idx_raw) == 0:
+                return err(f"基准指数 {idx_sym} 无数据")
+            idx_df, _ = _clean_ohlcv(idx_raw, limit=100000)
+            idx_df = idx_df[["date", "close"]].rename(columns={"close": "idx_close"})
+            idx_df = idx_df[(idx_df["date"] >= f"{start8[:4]}-{start8[4:6]}-{start8[6:]}")]
+
         if len(stock_df) == 0:
-            return err(f"{sym} 在 {start8}~{end8} 无行情数据")
-        try:
-            idx_raw = ak.stock_zh_index_daily(symbol=idx_sym)
-        except Exception as e:  # noqa: BLE001
-            return err(f"基准指数 {idx_sym} 获取失败: {type(e).__name__}: {e}")
-        if idx_raw is None or len(idx_raw) == 0:
-            return err(f"基准指数 {idx_sym} 无数据")
-        idx_df, _ = _clean_ohlcv(idx_raw, limit=100000)
-        idx_df = idx_df[["date", "close"]].rename(columns={"close": "idx_close"})
-        idx_df = idx_df[(idx_df["date"] >= f"{start8[:4]}-{start8[4:6]}-{start8[6:]}")]
+            return err(f"{sym} 无行情数据")
+        idx_df = idx_df[["date", "close"]].rename(columns={"close": "idx_close"}) if "idx_close" not in idx_df.columns else idx_df
 
         df = pd.merge(stock_df, idx_df, on="date", how="inner").sort_values("date").reset_index(drop=True)
         if len(df) < pre + 3:
@@ -123,6 +151,7 @@ def event_study(symbol: str, event_date: str, pre: int = 20, post: int = 20,
         summary = {
             "symbol": sym,
             "index_symbol": idx_sym,
+            "market": "美股" if us else "A股",
             "event_date_requested": ev_iso,
             "event_day": actual_event_day,
             "event_day_is_trading_day": actual_event_day == ev_iso,
@@ -158,7 +187,7 @@ def event_study(symbol: str, event_date: str, pre: int = 20, post: int = 20,
         }
         return ok(
             {"summary": summary, "window": rows},
-            meta(f"{src_stock} + akshare.stock_zh_index_daily", len(rows)),
+            meta(f"{src_stock} + {src_idx}", len(rows)),
             artifacts=[line, table],
         )
     except Exception as e:  # noqa: BLE001

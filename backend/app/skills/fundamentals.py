@@ -1,6 +1,12 @@
 """Fundamentals & macro skills (design.md §4):
 get_financial_abstract / get_financial_indicator / get_research_reports /
 get_lhb / get_margin / get_macro — whitelisted akshare interfaces only.
+
+美股支持：akshare.stock_us_spot_em 网络极不稳定，US 路径改为「K线派生 + 静默兜底」——
+- get_financial_abstract：先试 spot_em 拿当前价/PE/市值，失败/为美股则用 K线派生（最新价、
+  5/20/60 日 MA、30 日收益、60 日年化波动率、近 252 日最大回撤）。
+- get_financial_indicator：US 用 K线派生（MA5/20/60、收益、波动率、回撤）；A 股原样。
+- get_research_reports：US 无公开研报接口，返回空 + note 指向外部数据源建议。
 """
 from __future__ import annotations
 
@@ -10,7 +16,7 @@ from typing import Optional
 import akshare as ak
 import pandas as pd
 
-from .market import norm_date
+from .market import is_us_symbol, norm_date, norm_us_symbol
 from .registry import err, json_safe, meta, ok, skill
 
 
@@ -29,19 +35,165 @@ def _table_artifact(title: str, records: list[dict], note: str | None = None) ->
     return {"kind": "table", "title": title, "payload": payload}
 
 
+# --------------------------------------------------- US 派生指标 helper ----
+
+
+def _fetch_us_kline_df(sym: str) -> pd.DataFrame:
+    """取美股最近 250 行日K（已排序/清洗）。失败抛 ValueError。"""
+    from .market import _clean_ohlcv
+    df = ak.stock_us_daily(symbol=sym, adjust="qfq")
+    if df is None or len(df) == 0:
+        raise ValueError(f"美股 {sym} 无日K数据")
+    df, _ = _clean_ohlcv(df, limit=250)
+    return df
+
+
+def _try_us_spot(sym: str) -> Optional[dict]:
+    """尝试 stock_us_spot_em 拿当前价/PE/市值/换手率等。失败返回 None。"""
+    try:
+        df = ak.stock_us_spot_em(symbol=sym)
+    except Exception:  # noqa: BLE001
+        return None
+    if df is None or len(df) == 0:
+        return None
+    row = df.iloc[0].to_dict()
+    return {str(k).strip(): v for k, v in row.items()}
+
+
+def _derive_us_indicators(df: pd.DataFrame) -> list[dict]:
+    """从美股 K线派生常用技术/收益类指标。返回多期 records（最新→最旧）。"""
+    closes = pd.to_numeric(df["close"], errors="coerce").dropna().reset_index(drop=True)
+    n = len(closes)
+    if n < 5:
+        return []
+
+    def _ma(window: int) -> Optional[float]:
+        if n < window:
+            return None
+        return round(float(closes.tail(window).mean()), 4)
+
+    def _cum_return(days: int) -> Optional[float]:
+        if n < days + 1:
+            return None
+        c_now = float(closes.iloc[-1])
+        c_then = float(closes.iloc[-(days + 1)])
+        if c_then == 0:
+            return None
+        return round((c_now - c_then) / c_then * 100.0, 4)
+
+    def _vol_annualized(days: int) -> Optional[float]:
+        if n < days + 1:
+            return None
+        rets = closes.pct_change().tail(days).dropna()
+        if len(rets) < 5:
+            return None
+        return round(float(rets.std() * (252 ** 0.5) * 100.0), 4)
+
+    def _max_drawdown(days: int) -> Optional[float]:
+        if n < days:
+            window = closes
+        else:
+            window = closes.tail(days)
+        if len(window) < 2:
+            return None
+        cummax = window.cummax()
+        dd = (window - cummax) / cummax
+        return round(float(dd.min() * 100.0), 4)
+
+    # 仅输出一期「最新」记录——美股没有财报期概念
+    latest_price = round(float(closes.iloc[-1]), 4)
+    asof = str(df["date"].iloc[-1])
+    rec = {
+        "期间": asof,
+        "最新价": latest_price,
+        "MA5": _ma(5),
+        "MA20": _ma(20),
+        "MA60": _ma(60),
+        "30日收益(%)": _cum_return(30),
+        "60日收益(%)": _cum_return(60),
+        "60日年化波动率(%)": _vol_annualized(60),
+        "252日最大回撤(%)": _max_drawdown(252),
+    }
+    return [rec]
+
+
+def _enrich_us_indicators_with_spot(records: list[dict], spot: Optional[dict]) -> list[dict]:
+    """如果 spot 数据可用，把当前价/PE/市值/换手率合并进首期记录。"""
+    if not records or not spot:
+        return records
+    out = [dict(records[0])]
+    rest = list(records[1:])
+    # 不同 akshare 版本列名：中文/英文都可能
+    for src_key, dst_key in (
+        ("最新价", "现价(spot)"),
+        ("now", "现价(spot)"),
+        ("price", "现价(spot)"),
+        ("市值", "市值"),
+        ("market_cap", "市值"),
+        ("market_capital", "市值"),
+        ("市盈率", "市盈率(TTM)"),
+        ("pe", "市盈率(TTM)"),
+        ("pe_ttm", "市盈率(TTM)"),
+        ("市净率", "市净率"),
+        ("pb", "市净率"),
+        ("换手率", "换手率(%)"),
+        ("turnover", "换手率(%)"),
+        ("成交量", "成交量(spot)"),
+        ("volume", "成交量(spot)"),
+    ):
+        v = spot.get(src_key)
+        if v is None:
+            continue
+        try:
+            out[0][dst_key] = round(float(v), 4) if isinstance(v, (int, float)) else v
+        except (TypeError, ValueError):
+            out[0][dst_key] = v
+    return out + rest
+
+
 # ------------------------------------------------------- financials ------
 
 
 @skill(
     "get_financial_abstract",
-    "获取个股财务摘要（常用指标最近5期转置表：营收/净利润/ROE/毛利率/资产负债率等）。symbol 为6位代码。",
+    "获取个股财务摘要（常用指标最近5期转置表：营收/净利润/ROE/毛利率/资产负债率等）。"
+    "symbol 为 6 位 A 股代码或美股 ticker（如 AAPL）。"
+    "美股无公开财务摘要，改为 K线派生指标（MA5/20/60、收益、波动率、回撤），并尝试"
+    "akshare.stock_us_spot_em 拿当前价/PE/市值/换手率（失败静默降级）。",
     {
         "type": "object",
-        "properties": {"symbol": {"type": "string", "description": "6位股票代码"}},
+        "properties": {"symbol": {"type": "string",
+                                  "description": "6 位 A 股代码 / 美股 ticker (AAPL/TSLA/NVDA)"}},
         "required": ["symbol"],
     },
     internal=True,)
 def get_financial_abstract(symbol: str) -> dict:
+    # 美股路径：K线派生 + spot 静默兜底
+    if is_us_symbol(symbol):
+        try:
+            sym = norm_us_symbol(symbol)
+            df = _fetch_us_kline_df(sym)
+        except ValueError as e:
+            return err(str(e))
+        except Exception as e:  # noqa: BLE001
+            return err(f"美股日K获取失败: {type(e).__name__}: {e}")
+        records = _derive_us_indicators(df)
+        if not records:
+            return err(f"美股 {sym} 数据不足，无法派生指标")
+        spot = _try_us_spot(sym)
+        records = _enrich_us_indicators_with_spot(records, spot)
+        m = meta("akshare.stock_us_daily+derived", len(records))
+        if spot:
+            m["spot_enriched"] = True
+        m["market"] = "美股"
+        return ok(
+            records, m,
+            artifact=_table_artifact(
+                f"{sym} 美股技术/收益摘要（{records[0].get('期间')}）", records,
+                note="美股无公开财务摘要，本表由 K线 派生；如现价/PE 列存在表示 spot 兜底成功",
+            ),
+        )
+    # A 股路径：原样
     try:
         code = _code6(symbol)
         df = ak.stock_financial_abstract(symbol=code)
@@ -76,17 +228,41 @@ def get_financial_abstract(symbol: str) -> dict:
 
 @skill(
     "get_financial_indicator",
-    "获取个股财务指标时间序列（12个核心列：EPS/ROE/净利率/毛利率/资产负债率/增长率等），按年度。",
+    "获取个股财务指标时间序列（12个核心列：EPS/ROE/净利率/毛利率/资产负债率/增长率等），按年度。"
+    "美股无年度财务指标接口，US 路径改为 K线派生：MA5/20/60、30/60 日收益、年化波动率、最大回撤。",
     {
         "type": "object",
         "properties": {
-            "symbol": {"type": "string", "description": "6位股票代码"},
-            "start_year": {"type": "string", "description": "起始年份，如 2022，默认两年前"},
+            "symbol": {"type": "string",
+                       "description": "6 位 A 股代码 / 美股 ticker (AAPL/TSLA/NVDA)"},
+            "start_year": {"type": "string", "description": "起始年份（A 股）；美股忽略此参数"},
         },
         "required": ["symbol"],
     },
     internal=True,)
 def get_financial_indicator(symbol: str, start_year: Optional[str] = None) -> dict:
+    # 美股路径：K线派生（与 get_financial_abstract US 分支相同的指标集，但横轴是「近 N 日」快照）
+    if is_us_symbol(symbol):
+        try:
+            sym = norm_us_symbol(symbol)
+            df = _fetch_us_kline_df(sym)
+        except ValueError as e:
+            return err(str(e))
+        except Exception as e:  # noqa: BLE001
+            return err(f"美股日K获取失败: {type(e).__name__}: {e}")
+        records = _derive_us_indicators(df)
+        if not records:
+            return err(f"美股 {sym} 数据不足，无法派生指标")
+        m = meta("akshare.stock_us_daily+derived", len(records))
+        m["market"] = "美股"
+        return ok(
+            records, m,
+            artifact=_table_artifact(
+                f"{sym} 美股技术/收益指标（{records[0].get('期间')}）", records,
+                note="美股无年度财报接口；本表由 K线 派生最新一期",
+            ),
+        )
+    # A 股路径：原样
     try:
         code = _code6(symbol)
         start_year = (start_year or str(date.today().year - 2))[:4]
@@ -114,14 +290,28 @@ def get_financial_indicator(symbol: str, start_year: Optional[str] = None) -> di
 
 @skill(
     "get_research_reports",
-    "获取个股最近券商研报与评级（机构、评级、盈利预测、报告链接），限10条。",
+    "获取个股最近券商研报与评级（机构、评级、盈利预测、报告链接），限10条。"
+    "A 股用 akshare.stock_research_report_em；美股无对应接口，返回空 + 外部数据源建议。",
     {
         "type": "object",
-        "properties": {"symbol": {"type": "string", "description": "6位股票代码"}},
+        "properties": {"symbol": {"type": "string",
+                                  "description": "6 位 A 股代码 / 美股 ticker"}},
         "required": ["symbol"],
     },
     internal=True,)
 def get_research_reports(symbol: str) -> dict:
+    # 美股路径：akshare 无 US 研报接口，给出友好提示
+    if is_us_symbol(symbol):
+        sym = norm_us_symbol(symbol)
+        m = meta("us.no_research_report_api", 0)
+        m["market"] = "美股"
+        return ok(
+            [],
+            m,
+        ) | {"note": (f"美股 {sym} 无公开研报接口。建议改用以下外部数据源："
+                       "SEC EDGAR (sec.gov/edgar)、TipRanks、Seeking Alpha、Yahoo Finance Analyst、"
+                       "FRED 宏观面、Bloomberg/Refinitiv 终端、券商研报聚合 Wallstreetzen / Zacks 等。")}
+    # A 股路径：原样
     try:
         code = _code6(symbol)
         df = ak.stock_research_report_em(symbol=code)

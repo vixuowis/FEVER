@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any
 
 from ..llm import execute_skill
@@ -165,15 +166,17 @@ async def evidence_graph(action: str, **kwargs) -> dict:
 @skill(
     "market_research",
     "行情综合研究：并发拉取个股 K线 / 行业板块 / 资金流向 / 龙虎榜 等子数据并聚合。"
-    "symbol 为 6 位代码；lookback_days 默认 60；focus 限定子集 "
-    "（默认 ['price', 'sector', 'flow']）。",
+    "symbol 为 6 位 A 股代码或美股 ticker（如 AAPL/NVDA）；lookback_days 默认 60；"
+    "focus 限定子集（默认 ['price', 'sector', 'flow']）。"
+    "美股路径自动禁用 sector / flow / lhb（akshare 无 US 行业/资金流接口），只跑 price。",
     {
         "type": "object",
         "properties": {
-            "symbol": {"type": "string", "description": "6 位股票代码"},
+            "symbol": {"type": "string",
+                       "description": "6 位 A 股代码 / 美股 ticker (AAPL/NVDA/TSLA)"},
             "lookback_days": {"type": "integer", "description": "回溯天数，默认 60"},
             "focus": {"type": "array", "items": {"type": "string"},
-                      "description": "子集：price / sector / flow / lhb"},
+                      "description": "子集：price / sector / flow / lhb（美股仅 price 有效）"},
         },
         "required": ["symbol"],
         "additionalProperties": False,
@@ -184,37 +187,53 @@ async def evidence_graph(action: str, **kwargs) -> dict:
 )
 async def market_research(symbol: str, lookback_days: int = 60,
                           focus: list[str] | None = None) -> dict:
+    raw = (symbol or "").strip()
+    us = bool(raw) and is_us_symbol(raw)
     focus = focus or ["price", "sector", "flow"]
-    code = "".join(ch for ch in str(symbol) if ch.isdigit())[-6:]
-    if len(code) != 6:
-        return err(f"symbol 不合法: {symbol}")
+    if us:
+        # 美股路径：akshare 无 US 行业/资金流/龙虎榜接口，强制只跑 price
+        sym = raw.upper()
+        focus_eff = ["price"]
+    else:
+        code = "".join(ch for ch in raw if ch.isdigit())[-6:]
+        if len(code) != 6:
+            return err(f"symbol 不合法: {symbol}")
+        sym = code
+        focus_eff = focus
     from datetime import datetime, timedelta
     end = datetime.now().strftime("%Y%m%d")
     start = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y%m%d")
     tasks: list[tuple[str, dict]] = []
-    if "price" in focus:
-        tasks.append(("get_stock_daily", {"symbol": code, "start_date": start, "end_date": end, "adjust": "qfq"}))
-    if "sector" in focus:
-        tasks.append(("list_industry_boards", {"symbol": code}))
-        tasks.append(("get_board_change", {"symbol": code}))
-    if "flow" in focus:
-        tasks.append(("get_industry_fund_flow", {"symbol": code}))
-        tasks.append(("get_sector_fund_flow_rank", {"indicator": "今日"}))
-    if "lhb" in focus:
-        # 龙虎榜：日期范围需要 sub-tool 支持，先尝试今天
-        tasks.append(("get_lhb", {"start_date": start, "end_date": end}))
+    if "price" in focus_eff:
+        tasks.append(("get_stock_daily", {"symbol": sym, "start_date": start, "end_date": end, "adjust": "qfq"}))
+    if not us:
+        if "sector" in focus_eff:
+            tasks.append(("list_industry_boards", {"symbol": sym}))
+            tasks.append(("get_board_change", {"symbol": sym}))
+        if "flow" in focus_eff:
+            tasks.append(("get_industry_fund_flow", {"symbol": sym}))
+            tasks.append(("get_sector_fund_flow_rank", {"indicator": "今日"}))
+        if "lhb" in focus_eff:
+            # 龙虎榜：日期范围需要 sub-tool 支持，先尝试今天
+            tasks.append(("get_lhb", {"start_date": start, "end_date": end}))
     if not tasks:
         return err("focus 不能为空")
-
     results = await _gather_sub(tasks)
     summary = _summarize_subs(results)
     summary["composed"] = [n for n, _ in tasks]
+    out: dict = {"symbol": sym, "lookback_days": lookback_days, "focus": focus_eff,
+                 "market": "美股" if us else "A股",
+                 "sub_results": [{"skill": n, "ok": r.get("ok"),
+                                  "preview": _clip(str(r.get("data") or r.get("error")), 200)}
+                                 for (n, _), r in zip(tasks, results)],
+                 **summary}
+    if us:
+        # 美股禁用子集提示
+        disabled = [x for x in ("sector", "flow", "lhb") if x in focus]
+        if disabled:
+            out["note"] = f"美股路径不支持 {','.join(disabled)}（akshare 无 US 接口），仅返回价格"
     return ok(
-        {"symbol": code, "lookback_days": lookback_days, "focus": focus,
-         "sub_results": [{"skill": n, "ok": r.get("ok"),
-                          "preview": _clip(str(r.get("data") or r.get("error")), 200)}
-                         for (n, _), r in zip(tasks, results)],
-         **summary},
+        out,
         meta("market_research", len(tasks)),
         artifacts=_collect_artifacts(results) or None,
     )
@@ -520,13 +539,15 @@ async def macro_intel(topic: str | None = None) -> dict:
 @skill(
     "event_study_skill",
     "事件研究：基于 event_study 子能力，分析单次事件前后的异常收益（CAR）。"
-    "event_date YYYY-MM-DD，symbol 6 位代码，window_days 默认 30。"
-    "如果传 keyword 而无 symbol，先用 search_stock 解析。",
+    "event_date YYYY-MM-DD，symbol 支持 6 位 A 股代码或美股 ticker（AAPL/NVDA/TSLA）。"
+    "如果传 keyword 而无 symbol，先用 search_stock 解析（自动识别美股/ A 股）。"
+    "window_days 默认 30；美股默认基准 SPY，A 股默认 sh000300。",
     {
         "type": "object",
         "properties": {
             "event_date": {"type": "string", "description": "事件日期 YYYY-MM-DD"},
-            "symbol": {"type": "string", "description": "6 位股票代码（可选）"},
+            "symbol": {"type": "string",
+                       "description": "股票代码：A 股 6 位 / 美股 ticker（与 keyword 二选一）"},
             "keyword": {"type": "string", "description": "股票关键词（与 symbol 二选一）"},
             "window_days": {"type": "integer", "description": "事件窗口，默认 30"},
         },
@@ -539,26 +560,47 @@ async def macro_intel(topic: str | None = None) -> dict:
 async def event_study_skill(event_date: str, symbol: str | None = None,
                             keyword: str | None = None,
                             window_days: int = 30) -> dict:
-    code = "".join(ch for ch in str(symbol) if ch.isdigit())[-6:] if symbol else ""
-    if not code and keyword:
+    sym_raw = (symbol or "").strip()
+    us = bool(sym_raw) and is_us_symbol(sym_raw)
+    if us:
+        # 美股：保留原始 ticker（去空白 / 大写），如 AAPL / BRK.B
+        sym = sym_raw.upper()
+    elif sym_raw:
+        # A 股：截 6 位数字
+        code6 = "".join(ch for ch in sym_raw if ch.isdigit())[-6:]
+        if len(code6) == 6:
+            sym = code6
+        else:
+            sym = ""
+    else:
+        sym = ""
+    if not sym and keyword:
         r = await execute_skill("search_stock", {"keyword": keyword})
         if r.get("ok") and isinstance(r.get("data"), list) and r["data"]:
             d0 = r["data"][0]
-            cand = d0.get("symbol") or d0.get("代码") or d0.get("code") or ""
-            code = "".join(ch for ch in str(cand) if ch.isdigit())[-6:]
-    if not code:
+            cand = str(d0.get("symbol") or d0.get("代码") or d0.get("code") or "")
+            cand = cand.strip()
+            if is_us_symbol(cand):
+                sym = cand.upper()
+                us = True
+            else:
+                code6 = "".join(ch for ch in cand if ch.isdigit())[-6:]
+                if len(code6) == 6:
+                    sym = code6
+    if not sym:
         return err("必须提供 symbol 或 keyword")
     # event_study 子能力用 pre/post 表达事件窗口；window_days 转为单边窗口长度
     pre = max(1, min(int(window_days or 30), 60))
     post = pre
     result = await execute_skill("event_study", {
-        "event_date": event_date, "symbol": code,
+        "event_date": event_date, "symbol": sym,
         "pre": pre, "post": post,
     })
     if not result.get("ok"):
         return result
     return ok(
-        {"symbol": code, "event_date": event_date, "window_days": window_days,
+        {"symbol": sym, "market": "美股" if us else "A股",
+         "event_date": event_date, "window_days": window_days,
          "event_study": result.get("data")},
         meta("event_study_skill", 1),
         artifact=result.get("artifact"),
@@ -590,18 +632,29 @@ async def stock_overview(keyword: str) -> dict:
         return err(f"未找到股票: {keyword}")
     matches = r["data"][:3]
     primary = matches[0]
-    raw_symbol = str(primary.get("symbol") or primary.get("代码") or primary.get("code") or "")
-    # A 股：取 6 位数字；美股：取原始字母代码
-    if raw_symbol.isdigit() and len(raw_symbol) == 6:
-        market = "A"
-        code = raw_symbol
-    elif raw_symbol and any(c.isalpha() for c in raw_symbol):
-        # 美股：保留原 ticker（如 AMZN / BRK.B）
+    # 优先使用 search_stock 已经判定的 market 字段（A 股 sina 返回 symbol='sh600519'，
+    # 会让按 isalpha 启发式误判；这里直接以 search_stock 的结论为准）
+    market_str = str(primary.get("market", "") or "").strip()
+    raw_symbol = str(primary.get("symbol") or primary.get("代码") or primary.get("code") or "").strip()
+    if market_str == "美股" or is_us_symbol(raw_symbol):
         market = "US"
-        code = raw_symbol.strip().upper()
+        code = raw_symbol.upper()
+    elif market_str == "A股" or (raw_symbol and re.match(r"^(sh|sz|bj)\d{6}$", raw_symbol.lower())):
+        market = "A"
+        code = raw_symbol.lower()
+        if re.match(r"^\d{6}$", code):
+            code = "sh" + code if code[0] in ("6", "9") else ("bj" + code if code[0] in ("4", "8") else "sz" + code)
     else:
-        code = "".join(ch for ch in raw_symbol if ch.isdigit())[-6:]
-        market = "A" if code else "?"
+        # 兜底：尝试抽 6 位
+        code6 = "".join(ch for ch in raw_symbol if ch.isdigit())[-6:]
+        if len(code6) == 6:
+            market = "A"
+            code = "sh" + code6 if code6[0] in ("6", "9") else ("bj" + code6 if code6[0] in ("4", "8") else "sz" + code6)
+        elif raw_symbol and any(c.isalpha() for c in raw_symbol):
+            market = "US"
+            code = raw_symbol.upper()
+        else:
+            return err(f"搜索结果无 symbol: {primary}")
     if not code:
         return err(f"搜索结果无 symbol: {primary}")
     from datetime import datetime, timedelta

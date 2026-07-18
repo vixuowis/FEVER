@@ -85,6 +85,7 @@ _US_NAME_MAP: dict[str, tuple[str, str, str]] = {
     "jd.com": ("JD", "JD.com, Inc.", "纳斯达克"),
     "拼多多": ("PDD", "PDD Holdings Inc.", "纳斯达克"),
     "pinduoduo": ("PDD", "PDD Holdings Inc.", "纳斯达克"),
+    "pdd": ("PDD", "PDD Holdings Inc.", "纳斯达克"),
     "百度": ("BIDU", "Baidu, Inc.", "纳斯达克"),
     "baidu": ("BIDU", "Baidu, Inc.", "纳斯达克"),
     "蔚来": ("NIO", "NIO Inc.", "纽交所"),
@@ -110,6 +111,205 @@ _US_NAME_MAP: dict[str, tuple[str, str, str]] = {
     "airbnb": ("ABNB", "Airbnb, Inc.", "纳斯达克"),
     "spotify": ("SPOT", "Spotify Technology S.A.", "纽交所"),
     "shopify": ("SHOP", "Shopify Inc.", "纽交所"),
+    # ---- 消费 / 零售 / 餐饮 ----
+    "好市多": ("COST", "Costco Wholesale Corporation", "纳斯达克"),
+    "costco": ("COST", "Costco Wholesale Corporation", "纳斯达克"),
+    "麦当劳": ("MCD", "McDonald's Corporation", "纽交所"),
+    "mcdonald": ("MCD", "McDonald's Corporation", "纽交所"),
+    "mcd": ("MCD", "McDonald's Corporation", "纽交所"),
+    "开市客": ("COST", "Costco Wholesale Corporation", "纳斯达克"),
+    "home depot": ("HD", "The Home Depot, Inc.", "纽交所"),
+    "家居": ("HD", "The Home Depot, Inc.", "纽交所"),
+    "hd": ("HD", "The Home Depot, Inc.", "纽交所"),
+    "homedepot": ("HD", "The Home Depot, Inc.", "纽交所"),
+    "露露柠檬": ("LULU", "Lululemon Athletica Inc.", "纳斯达克"),
+    "lululemon": ("LULU", "Lululemon Athletica Inc.", "纳斯达克"),
+    # ---- 金融 / 银行 ----
+    "美国银行": ("BAC", "Bank of America Corporation", "纽交所"),
+    "bac": ("BAC", "Bank of America Corporation", "纽交所"),
+    "富国银行": ("WFC", "Wells Fargo & Company", "纽交所"),
+    "wells fargo": ("WFC", "Wells Fargo & Company", "纽交所"),
+    "wfc": ("WFC", "Wells Fargo & Company", "纽交所"),
+    "花旗": ("C", "Citigroup Inc.", "纽交所"),
+    "citigroup": ("C", "Citigroup Inc.", "纽交所"),
+    "citi": ("C", "Citigroup Inc.", "纽交所"),
+    "高盛": ("GS", "The Goldman Sachs Group, Inc.", "纽交所"),
+    "goldman": ("GS", "The Goldman Sachs Group, Inc.", "纽交所"),
+    "gs": ("GS", "The Goldman Sachs Group, Inc.", "纽交所"),
+    "美国运通": ("AXP", "American Express Company", "纽交所"),
+    "amex": ("AXP", "American Express Company", "纽交所"),
+    "贝莱德": ("BLK", "BlackRock, Inc.", "纽交所"),
+    "blackrock": ("BLK", "BlackRock, Inc.", "纽交所"),
+    "伯克希尔": ("BRK.B", "Berkshire Hathaway Inc. (Class B)", "纽交所"),
+    "berkshire": ("BRK.B", "Berkshire Hathaway Inc. (Class B)", "纽交所"),
+    "brk": ("BRK.B", "Berkshire Hathaway Inc. (Class B)", "纽交所"),
+    "黑石": ("BX", "Blackstone Inc.", "纽交所"),
+    "blackstone": ("BX", "Blackstone Inc.", "纽交所"),
+    "摩根士丹利": ("MS", "Morgan Stanley", "纽交所"),
+    "morgan stanley": ("MS", "Morgan Stanley", "纽交所"),
+    # ---- 通信 / 媒体 ----
+    "at&t": ("T", "AT&T Inc.", "纽交所"),
+    "att": ("T", "AT&T Inc.", "纽交所"),
+    "verizon": ("VZ", "Verizon Communications Inc.", "纽交所"),
+    "威瑞森": ("VZ", "Verizon Communications Inc.", "纽交所"),
+    "comcast": ("CMCSA", "Comcast Corporation", "纳斯达克"),
+    "康卡斯特": ("CMCSA", "Comcast Corporation", "纳斯达克"),
+    "奈飞": ("NFLX", "Netflix, Inc.", "纳斯达克"),
+    "netflix": ("NFLX", "Netflix, Inc.", "纳斯达克"),
+    # ---- 半导体 / 硬件 ----
+    "amd": ("AMD", "Advanced Micro Devices, Inc.", "纳斯达克"),
+    "超微": ("AMD", "Advanced Micro Devices, Inc.", "纳斯达克"),
+    "高通": ("QCOM", "QUALCOMM Incorporated", "纳斯达克"),
+    "qualcomm": ("QCOM", "QUALCOMM Incorporated", "纳斯达克"),
+    "德州仪器": ("TXN", "Texas Instruments Incorporated", "纳斯达克"),
+    "texas instruments": ("TXN", "Texas Instruments Incorporated", "纳斯达克"),
+    "ti": ("TXN", "Texas Instruments Incorporated", "纳斯达克"),
+    "asml": ("ASML", "ASML Holding N.V.", "纳斯达克"),
+    "阿斯麦": ("ASML", "ASML Holding N.V.", "纳斯达克"),
+    "台积电": ("TSM", "Taiwan Semiconductor Manufacturing", "纽交所"),
+    "tsmc": ("TSM", "Taiwan Semiconductor Manufacturing", "纽交所"),
+    "应用材料": ("AMAT", "Applied Materials, Inc.", "纳斯达克"),
+    "applied materials": ("AMAT", "Applied Materials, Inc.", "纳斯达克"),
+    "博通": ("AVGO", "Broadcom Inc.", "纳斯达克"),
+    "broadcom": ("AVGO", "Broadcom Inc.", "纳斯达克"),
+    "lam research": ("LRCX", "Lam Research Corporation", "纳斯达克"),
+    # ---- 工业 / 国防 / 能源 ----
+    "波音": ("BA", "The Boeing Company", "纽交所"),
+    "boeing": ("BA", "The Boeing Company", "纽交所"),
+    "卡特彼勒": ("CAT", "Caterpillar Inc.", "纽交所"),
+    "caterpillar": ("CAT", "Caterpillar Inc.", "纽交所"),
+    "洛克希德": ("LMT", "Lockheed Martin Corporation", "纽交所"),
+    "lockheed": ("LMT", "Lockheed Martin Corporation", "纽交所"),
+    "雷神": ("RTX", "RTX Corporation", "纽交所"),
+    "raytheon": ("RTX", "RTX Corporation", "纽交所"),
+    "3m": ("MMM", "3M Company", "纽交所"),
+    "通用电气": ("GE", "GE Aerospace", "纽交所"),
+    "ge": ("GE", "GE Aerospace", "纽交所"),
+    "霍尼韦尔": ("HON", "Honeywell International Inc.", "纳斯达克"),
+    "honeywell": ("HON", "Honeywell International Inc.", "纳斯达克"),
+    "福特": ("F", "Ford Motor Company", "纽交所"),
+    "ford": ("F", "Ford Motor Company", "纽交所"),
+    "通用汽车": ("GM", "General Motors Company", "纽交所"),
+    "rivian": ("RIVN", "Rivian Automotive, Inc.", "纳斯达克"),
+    "lucid": ("LCID", "Lucid Group, Inc.", "纳斯达克"),
+    "特斯拉对手": ("RIVN", "Rivian Automotive, Inc.", "纳斯达克"),
+    "埃克森": ("XOM", "Exxon Mobil Corporation", "纽交所"),
+    "exxon": ("XOM", "Exxon Mobil Corporation", "纽交所"),
+    "雪佛龙": ("CVX", "Chevron Corporation", "纽交所"),
+    "chevron": ("CVX", "Chevron Corporation", "纽交所"),
+    # ---- 医疗 / 医药 ----
+    "辉瑞": ("PFE", "Pfizer Inc.", "纽交所"),
+    "pfizer": ("PFE", "Pfizer Inc.", "纽交所"),
+    "强生": ("JNJ", "Johnson & Johnson", "纽交所"),
+    "默克": ("MRK", "Merck & Co., Inc.", "纽交所"),
+    "merck": ("MRK", "Merck & Co., Inc.", "纽交所"),
+    "礼来": ("LLY", "Eli Lilly and Company", "纽交所"),
+    "eli lilly": ("LLY", "Eli Lilly and Company", "纽交所"),
+    "lilly": ("LLY", "Eli Lilly and Company", "纽交所"),
+    "艾伯维": ("ABBV", "AbbVie Inc.", "纽交所"),
+    "abbvie": ("ABBV", "AbbVie Inc.", "纽交所"),
+    "百时美": ("BMY", "Bristol-Myers Squibb Company", "纽交所"),
+    "bms": ("BMY", "Bristol-Myers Squibb Company", "纽交所"),
+    "雅培": ("ABT", "Abbott Laboratories", "纽交所"),
+    "abbott": ("ABT", "Abbott Laboratories", "纽交所"),
+    "联合健康": ("UNH", "UnitedHealth Group Incorporated", "纽交所"),
+    "unitedhealth": ("UNH", "UnitedHealth Group Incorporated", "纽交所"),
+    "moderna": ("MRNA", "Moderna, Inc.", "纳斯达克"),
+    "莫德纳": ("MRNA", "Moderna, Inc.", "纳斯达克"),
+    "吉利德": ("GILD", "Gilead Sciences, Inc.", "纳斯达克"),
+    "gilead": ("GILD", "Gilead Sciences, Inc.", "纳斯达克"),
+    "再生元": ("REGN", "Regeneron Pharmaceuticals, Inc.", "纳斯达克"),
+    "regeneron": ("REGN", "Regeneron Pharmaceuticals, Inc.", "纳斯达克"),
+    # ---- 科技 / SaaS / 互联网 / 加密 ----
+    "salesforce": ("CRM", "Salesforce, Inc.", "纽交所"),
+    "赛富时": ("CRM", "Salesforce, Inc.", "纽交所"),
+    "crm": ("CRM", "Salesforce, Inc.", "纽交所"),
+    "snowflake": ("SNOW", "Snowflake Inc.", "纽交所"),
+    "雪花": ("SNOW", "Snowflake Inc.", "纽交所"),
+    "palantir": ("PLTR", "Palantir Technologies Inc.", "纳斯达克"),
+    "pltr": ("PLTR", "Palantir Technologies Inc.", "纳斯达克"),
+    "coinbase": ("COIN", "Coinbase Global, Inc.", "纳斯达克"),
+    "coin": ("COIN", "Coinbase Global, Inc.", "纳斯达克"),
+    "paypal": ("PYPL", "PayPal Holdings, Inc.", "纳斯达克"),
+    "贝宝": ("PYPL", "PayPal Holdings, Inc.", "纳斯达克"),
+    "block": ("SQ", "Block, Inc.", "纽交所"),
+    "sq": ("SQ", "Block, Inc.", "纽交所"),
+    "roblox": ("RBLX", "Roblox Corporation", "纽交所"),
+    "unity": ("U", "Unity Software Inc.", "纽交所"),
+    "doordash": ("DASH", "DoorDash, Inc.", "纳斯达克"),
+    "dashi": ("DASH", "DoorDash, Inc.", "纳斯达克"),
+    "etsy": ("ETSY", "Etsy, Inc.", "纳斯达克"),
+    "snap": ("SNAP", "Snap Inc.", "纽交所"),
+    "snapchat": ("SNAP", "Snap Inc.", "纽交所"),
+    "pinterest": ("PINS", "Pinterest, Inc.", "纽交所"),
+    "roku": ("ROKU", "Roku, Inc.", "纳斯达克"),
+    "lyft": ("LYFT", "Lyft, Inc.", "纳斯达克"),
+    "zoom": ("ZM", "Zoom Video Communications, Inc.", "纳斯达克"),
+    "docu": ("DOCU", "DocuSign, Inc.", "纳斯达克"),
+    "docusign": ("DOCU", "DocuSign, Inc.", "纳斯达克"),
+    # ---- 出行 / 旅游 / 航司 ----
+    "达美": ("DAL", "Delta Air Lines, Inc.", "纽交所"),
+    "delta": ("DAL", "Delta Air Lines, Inc.", "纽交所"),
+    "美国航空": ("AAL", "American Airlines Group Inc.", "纳斯达克"),
+    "american airlines": ("AAL", "American Airlines Group Inc.", "纳斯达克"),
+    "西南航空": ("LUV", "Southwest Airlines Co.", "纽交所"),
+    "southwest": ("LUV", "Southwest Airlines Co.", "纽交所"),
+    "联合航空": ("UAL", "United Airlines Holdings, Inc.", "纳斯达克"),
+    "united airlines": ("UAL", "United Airlines Holdings, Inc.", "纳斯达克"),
+    "万豪": ("MAR", "Marriott International, Inc.", "纳斯达克"),
+    "marriott": ("MAR", "Marriott International, Inc.", "纳斯达克"),
+    "希尔顿": ("HLT", "Hilton Worldwide Holdings Inc.", "纽交所"),
+    "hilton": ("HLT", "Hilton Worldwide Holdings Inc.", "纽交所"),
+    "booking": ("BKNG", "Booking Holdings Inc.", "纳斯达克"),
+    "expedia": ("EXPE", "Expedia Group, Inc.", "纳斯达克"),
+    # ---- 汽车 / 出行 ----
+    "法拉利": ("RACE", "Ferrari N.V.", "纽交所"),
+    "ferrari": ("RACE", "Ferrari N.V.", "纽交所"),
+    "丰田": ("TM", "Toyota Motor Corporation", "纽交所"),
+    "toyota": ("TM", "Toyota Motor Corporation", "纽交所"),
+    "本田": ("HMC", "Honda Motor Co., Ltd.", "纽交所"),
+    "honda": ("HMC", "Honda Motor Co., Ltd.", "纽交所"),
+    "加拿大皇家": ("RY", "Royal Bank of Canada", "纽交所"),
+    "rbc": ("RY", "Royal Bank of Canada", "纽交所"),
+    # ---- 中概股补全 ----
+    "网易": ("NTES", "NetEase, Inc.", "纳斯达克"),
+    "netease": ("NTES", "NetEase, Inc.", "纳斯达克"),
+    "腾讯音乐": ("TME", "Tencent Music Entertainment", "纽交所"),
+    "中通": ("ZTO", "ZTO Express (Cayman) Inc.", "纽交所"),
+    "zto": ("ZTO", "ZTO Express (Cayman) Inc.", "纽交所"),
+    "百胜中国": ("YUMC", "Yum China Holdings, Inc.", "纽交所"),
+    "yum china": ("YUMC", "Yum China Holdings, Inc.", "纽交所"),
+    "好未来": ("TAL", "TAL Education Group", "纽交所"),
+    "tal": ("TAL", "TAL Education Group", "纽交所"),
+    "新东方": ("EDU", "New Oriental Education & Technology", "纽交所"),
+    "新东方教育": ("EDU", "New Oriental Education & Technology", "纽交所"),
+    "唯品会": ("VIPS", "Vipshop Holdings Limited", "纽交所"),
+    "vipshop": ("VIPS", "Vipshop Holdings Limited", "纽交所"),
+    # ---- 指数 ETF ----
+    "spy": ("SPY", "SPDR S&P 500 ETF Trust", "纽交所"),
+    "标普500": ("SPY", "SPDR S&P 500 ETF Trust", "纽交所"),
+    "标普 500": ("SPY", "SPDR S&P 500 ETF Trust", "纽交所"),
+    "s&p 500": ("SPY", "SPDR S&P 500 ETF Trust", "纽交所"),
+    "s&p500": ("SPY", "SPDR S&P 500 ETF Trust", "纽交所"),
+    "qqq": ("QQQ", "Invesco QQQ Trust", "纳斯达克"),
+    "纳斯达克100": ("QQQ", "Invesco QQQ Trust", "纳斯达克"),
+    "nasdaq 100": ("QQQ", "Invesco QQQ Trust", "纳斯达克"),
+    "tqqq": ("TQQQ", "ProShares UltraPro QQQ", "纳斯达克"),
+    "三倍做多纳斯达克": ("TQQQ", "ProShares UltraPro QQQ", "纳斯达克"),
+    "sqqq": ("SQQQ", "ProShares UltraPro Short QQQ", "纳斯达克"),
+    "三倍做空纳斯达克": ("SQQQ", "ProShares UltraPro Short QQQ", "纳斯达克"),
+    "voo": ("VOO", "Vanguard S&P 500 ETF", "纽交所"),
+    "vti": ("VTI", "Vanguard Total Stock Market ETF", "纽交所"),
+    "iwm": ("IWM", "iShares Russell 2000 ETF", "纽交所"),
+    "罗素2000": ("IWM", "iShares Russell 2000 ETF", "纽交所"),
+    "dia": ("DIA", "SPDR Dow Jones Industrial Average ETF", "纽交所"),
+    "道琼斯etf": ("DIA", "SPDR Dow Jones Industrial Average ETF", "纽交所"),
+    "arkk": ("ARKK", "ARK Innovation ETF", "纽交所"),
+    "木头姐": ("ARKK", "ARK Innovation ETF", "纽交所"),
+    "kweb": ("KWEB", "KraneShares CSI China Internet ETF", "纽交所"),
+    "中概互联etf": ("KWEB", "KraneShares CSI China Internet ETF", "纽交所"),
+    "mchi": ("MCHI", "iShares MSCI China ETF", "纳斯达克"),
+    "msci中国": ("MCHI", "iShares MSCI China ETF", "纳斯达克"),
 }
 
 
@@ -225,8 +425,9 @@ def _clean_ohlcv(df: pd.DataFrame, limit: int = 250) -> tuple[pd.DataFrame, bool
 
 @skill(
     "search_stock",
-    "按名称/拼音/代码搜索股票，返回前5个匹配（名称、代码、symbol）。A 股用 sina suggest；"
-    "未命中时本地美股名称映射兜底（Amazon→AMZN、Apple→AAPL、特斯拉→TSLA 等约 40 个常见标的）。",
+    "按名称/拼音/代码搜索股票，返回前5个匹配（名称、代码、symbol）。"
+    "A 股用 sina suggest；本地美股名称映射兜底（约 100+ 个常见标的，覆盖消费/金融/科技/中概/ETF）。"
+    "两路都查，结果去重合并（market 字段区分美股/ A 股）。",
     {
         "type": "object",
         "properties": {"keyword": {"type": "string", "description": "股票名称、简称或代码片段"}},
@@ -234,7 +435,7 @@ def _clean_ohlcv(df: pd.DataFrame, limit: int = 250) -> tuple[pd.DataFrame, bool
     },
     internal=True,)
 def search_stock(keyword: str) -> dict:
-    # 1) A 股搜索：sina suggest3
+    # 1) A 股搜索：sina suggest3（网络失败也不算致命）
     a_items: list[dict] = []
     a_meta: dict = {"source": "sina.suggest3", "count": 0}
     try:
@@ -255,29 +456,48 @@ def search_stock(keyword: str) -> dict:
                 continue
             parts = entry.split(",")
             if len(parts) >= 4 and parts[1] in ("11", "12") and re.match(r"^\d{6}$", parts[2]):
-                a_items.append({"name": parts[0], "code": parts[2], "symbol": parts[3]})
+                a_items.append({
+                    "name": parts[0], "code": parts[2], "symbol": parts[3],
+                    "market": "A股", "exchange": "上交所/深交所/北交所",
+                })
                 if len(a_items) >= 5:
                     break
         a_meta["count"] = len(a_items)
     except Exception as e:  # noqa: BLE001
-        # A 股搜索失败不算致命，继续尝试美股兜底
         a_meta = {"source": "sina.suggest3", "count": 0, "a_share_error": f"{type(e).__name__}: {e}"}
-    if a_items:
-        return ok(a_items, a_meta)
 
-    # 2) 美股兜底：本地常见名称映射
+    # 2) 美股兜底：本地常见名称映射（独立于 A 股结果）
     us_items = _lookup_us_name(keyword)
-    if us_items:
-        return ok(
-            us_items,
-            {"source": "us.name_map", "count": len(us_items), "fallback": True},
-        )
 
-    return ok(
-        [],
-        {"source": "sina.suggest3+us.name_map", "count": 0, "fallback_tried": True},
-        artifact=None,
-    ) | {"note": f"未找到匹配股票：{keyword}（A 股 / 美股均未命中）"}
+    # 3) 合并去重（A 股按 code，美股按 code），A 股优先（与既有行为一致）
+    merged: list[dict] = list(a_items)
+    seen_codes: set[str] = {x.get("code", "") for x in a_items}
+    for u in us_items:
+        if u.get("code") and u["code"] in seen_codes:
+            continue
+        merged.append(u)
+        seen_codes.add(u.get("code", ""))
+    # 单源总条数 ≤ 5（与原接口约束一致）
+    if len(merged) > 5:
+        merged = merged[:5]
+
+    if not merged:
+        return ok(
+            [],
+            {"source": "sina.suggest3+us.name_map", "count": 0, "fallback_tried": True},
+            artifact=None,
+        ) | {"note": f"未找到匹配股票：{keyword}（A 股 / 美股均未命中）"}
+
+    # 拼 meta：标注两条线都跑了
+    m_out = {
+        "source": "sina.suggest3+us.name_map",
+        "count": len(merged),
+        "a_share_count": len(a_items),
+        "us_count": len(us_items),
+    }
+    if a_meta.get("a_share_error"):
+        m_out["a_share_error"] = a_meta["a_share_error"]
+    return ok(merged, m_out)
 
 
 @skill(
