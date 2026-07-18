@@ -25,7 +25,14 @@ def health():
 def skills():
     ensure_skills_loaded()
     return [
-        {"name": s.name, "description": s.description, "parameters": s.parameters}
+        {
+            "name": s.name,
+            "description": s.description,
+            "parameters": s.parameters,
+            "category": s.category,        # "atomic" | "composite"
+            "internal": s.internal,        # True: LLM 不可见
+            "composes": list(s.composes),  # composite 声明调用的 sub-skill
+        }
         for s in REGISTRY.values()
     ]
 

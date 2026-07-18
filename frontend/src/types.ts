@@ -31,6 +31,9 @@ export interface SkillMeta {
   name: string;
   description: string;
   parameters?: Record<string, unknown>;
+  category?: "atomic" | "composite";
+  internal?: boolean;
+  composes?: string[];
 }
 
 /** Agent 花名册 GET /api/agents */
