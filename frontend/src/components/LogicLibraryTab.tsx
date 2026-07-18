@@ -62,14 +62,14 @@ export default function LogicLibraryTab() {
           团队模式研究结论中的「可证伪推演/情景」会自动入库。
           通过市场验证后，可标记为「已证实 / 已证伪」，形成个人研究逻辑资产。
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
           <Filter size={12} className="text-faint" />
           {FILTERS.map((f) => (
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
               className={cls(
-                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-colors",
                 filter === f.id
                   ? "border-brand/40 bg-brand text-card"
                   : "border-edge bg-card text-mute hover:border-brand/30 hover:text-brand",
@@ -79,7 +79,7 @@ export default function LogicLibraryTab() {
               {f.label}
               <span
                 className={cls(
-                  "rounded-full px-1 text-[9.5px]",
+                  "rounded-full px-1.5 text-[10px] tabular-nums",
                   filter === f.id ? "bg-card/30" : "bg-[#F4F2EE] text-faint",
                 )}
               >
