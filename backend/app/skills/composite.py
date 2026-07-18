@@ -466,27 +466,45 @@ async def stock_overview(keyword: str) -> dict:
         return err(f"未找到股票: {keyword}")
     matches = r["data"][:3]
     primary = matches[0]
-    code = "".join(ch for ch in str(primary.get("symbol") or primary.get("代码") or primary.get("code") or "") if ch.isdigit())[-6:]
+    raw_symbol = str(primary.get("symbol") or primary.get("代码") or primary.get("code") or "")
+    # A 股：取 6 位数字；美股：取原始字母代码
+    if raw_symbol.isdigit() and len(raw_symbol) == 6:
+        market = "A"
+        code = raw_symbol
+    elif raw_symbol and any(c.isalpha() for c in raw_symbol):
+        # 美股：保留原 ticker（如 AMZN / BRK.B）
+        market = "US"
+        code = raw_symbol.strip().upper()
+    else:
+        code = "".join(ch for ch in raw_symbol if ch.isdigit())[-6:]
+        market = "A" if code else "?"
     if not code:
         return err(f"搜索结果无 symbol: {primary}")
     from datetime import datetime, timedelta
     end = datetime.now().strftime("%Y%m%d")
     start = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
-    tasks = [
-        ("get_financial_abstract", {"symbol": code}),
-        ("get_stock_daily", {"symbol": code, "start_date": start, "end_date": end, "adjust": "qfq"}),
-    ]
+    # 美股没有 A 股财务摘要，只取日K
+    if market == "US":
+        tasks = [
+            ("get_stock_daily", {"symbol": code, "start_date": start, "end_date": end, "adjust": "qfq"}),
+        ]
+    else:
+        tasks = [
+            ("get_financial_abstract", {"symbol": code}),
+            ("get_stock_daily", {"symbol": code, "start_date": start, "end_date": end, "adjust": "qfq"}),
+        ]
     results = await _gather_sub(tasks)
     summary = _summarize_subs(results)
     summary["composed"] = ["search_stock"] + [n for n, _ in tasks]
+    summary["market"] = "美股" if market == "US" else "A股"
     sub_arts = _collect_artifacts(results)
     # search_stock 的 artifact 也捎上
     if r.get("artifact"):
         sub_arts = [r["artifact"]] + sub_arts
     return ok(
-        {"keyword": keyword, "resolved_symbol": code,
+        {"keyword": keyword, "resolved_symbol": code, "market": market,
          "matches": [{"name": primary.get("name") or primary.get("名称"),
-                      "symbol": code}], **summary},
+                      "symbol": code, "market": "美股" if market == "US" else "A股"}], **summary},
         meta("stock_overview", len(tasks) + 1),
         artifacts=sub_arts or None,
     )

@@ -38,6 +38,106 @@ def norm_us_symbol(symbol: str) -> str:
     return (symbol or "").strip().upper()
 
 
+# 常用美股中文/英文名 → ticker 映射（akshare.get_us_stock_name 网络不稳定时的兜底）
+# 键使用全小写；查询时调用方需先 lower 后再查
+_US_NAME_MAP: dict[str, tuple[str, str, str]] = {
+    # 中文名
+    "亚马逊": ("AMZN", "Amazon.com", "纳斯达克"),
+    "苹果": ("AAPL", "Apple Inc.", "纳斯达克"),
+    "特斯拉": ("TSLA", "Tesla, Inc.", "纳斯达克"),
+    "英伟达": ("NVDA", "NVIDIA Corporation", "纳斯达克"),
+    "微软": ("MSFT", "Microsoft Corporation", "纳斯达克"),
+    "谷歌": ("GOOGL", "Alphabet Inc. (Class A)", "纳斯达克"),
+    "alphabet": ("GOOGL", "Alphabet Inc. (Class A)", "纳斯达克"),
+    "脸书": ("META", "Meta Platforms, Inc.", "纳斯达克"),
+    "meta": ("META", "Meta Platforms, Inc.", "纳斯达克"),
+    "奈飞": ("NFLX", "Netflix, Inc.", "纳斯达克"),
+    "netflix": ("NFLX", "Netflix, Inc.", "纳斯达克"),
+    "英特": ("INTC", "Intel Corporation", "纳斯达克"),
+    "intel": ("INTC", "Intel Corporation", "纳斯达克"),
+    "波音": ("BA", "The Boeing Company", "纽交所"),
+    "boeing": ("BA", "The Boeing Company", "纽交所"),
+    "可口可乐": ("KO", "The Coca-Cola Company", "纽交所"),
+    "coca-cola": ("KO", "The Coca-Cola Company", "纽交所"),
+    "百事": ("PEP", "PepsiCo, Inc.", "纳斯达克"),
+    "pepsico": ("PEP", "PepsiCo, Inc.", "纳斯达克"),
+    "迪士尼": ("DIS", "The Walt Disney Company", "纽交所"),
+    "disney": ("DIS", "The Walt Disney Company", "纽交所"),
+    "摩根大通": ("JPM", "JPMorgan Chase & Co.", "纽交所"),
+    "jpmorgan": ("JPM", "JPMorgan Chase & Co.", "纽交所"),
+    "visa": ("V", "Visa Inc.", "纽交所"),
+    "万事达": ("MA", "Mastercard Incorporated", "纽交所"),
+    "mastercard": ("MA", "Mastercard Incorporated", "纽交所"),
+    "沃尔玛": ("WMT", "Walmart Inc.", "纽交所"),
+    "walmart": ("WMT", "Walmart Inc.", "纽交所"),
+    "耐克": ("NKE", "NIKE, Inc.", "纽交所"),
+    "nike": ("NKE", "NIKE, Inc.", "纽交所"),
+    "星巴克": ("SBUX", "Starbucks Corporation", "纳斯达克"),
+    "starbucks": ("SBUX", "Starbucks Corporation", "纳斯达克"),
+    "宝洁": ("PG", "The Procter & Gamble Company", "纽交所"),
+    "强生": ("JNJ", "Johnson & Johnson", "纽交所"),
+    "辉瑞": ("PFE", "Pfizer Inc.", "纽交所"),
+    "pfizer": ("PFE", "Pfizer Inc.", "纽交所"),
+    "中概互联": ("KWEB", "KraneShares CSI China Internet", "纽交所"),
+    "阿里巴巴": ("BABA", "Alibaba Group Holding Limited", "纽交所"),
+    "alibaba": ("BABA", "Alibaba Group Holding Limited", "纽交所"),
+    "京东": ("JD", "JD.com, Inc.", "纳斯达克"),
+    "jd.com": ("JD", "JD.com, Inc.", "纳斯达克"),
+    "拼多多": ("PDD", "PDD Holdings Inc.", "纳斯达克"),
+    "pinduoduo": ("PDD", "PDD Holdings Inc.", "纳斯达克"),
+    "百度": ("BIDU", "Baidu, Inc.", "纳斯达克"),
+    "baidu": ("BIDU", "Baidu, Inc.", "纳斯达克"),
+    "蔚来": ("NIO", "NIO Inc.", "纽交所"),
+    "nio": ("NIO", "NIO Inc.", "纽交所"),
+    "小鹏": ("XPEV", "XPeng Inc.", "纽交所"),
+    "xpeng": ("XPEV", "XPeng Inc.", "纽交所"),
+    "理想": ("LI", "Li Auto Inc.", "纳斯达克"),
+    "li auto": ("LI", "Li Auto Inc.", "纳斯达克"),
+    "b站": ("BILI", "Bilibili Inc.", "纳斯达克"),
+    "bilibili": ("BILI", "Bilibili Inc.", "纳斯达克"),
+    # 常用英文短名（用户可能直接用英文搜）
+    "amazon": ("AMZN", "Amazon.com", "纳斯达克"),
+    "apple": ("AAPL", "Apple Inc.", "纳斯达克"),
+    "tesla": ("TSLA", "Tesla, Inc.", "纳斯达克"),
+    "nvidia": ("NVDA", "NVIDIA Corporation", "纳斯达克"),
+    "microsoft": ("MSFT", "Microsoft Corporation", "纳斯达克"),
+    "google": ("GOOGL", "Alphabet Inc. (Class A)", "纳斯达克"),
+    "ibm": ("IBM", "International Business Machines", "纽交所"),
+    "cisco": ("CSCO", "Cisco Systems, Inc.", "纳斯达克"),
+    "oracle": ("ORCL", "Oracle Corporation", "纽交所"),
+    "adobe": ("ADBE", "Adobe Inc.", "纳斯达克"),
+    "uber": ("UBER", "Uber Technologies, Inc.", "纽交所"),
+    "airbnb": ("ABNB", "Airbnb, Inc.", "纳斯达克"),
+    "spotify": ("SPOT", "Spotify Technology S.A.", "纽交所"),
+    "shopify": ("SHOP", "Shopify Inc.", "纽交所"),
+}
+
+
+def _lookup_us_name(keyword: str) -> list[dict]:
+    """本地兜底：把 keyword 解释为美股代码。返回最多 3 个匹配。"""
+    if not keyword:
+        return []
+    k = keyword.strip().lower()
+    if not k:
+        return []
+    # 1) 精确匹配
+    hit = _US_NAME_MAP.get(k)
+    if hit:
+        return [{"name": hit[1], "code": hit[0], "symbol": hit[0], "market": "美股", "exchange": hit[2]}]
+    # 2) 子串匹配（中文名 / ticker 前缀）
+    out: list[dict] = []
+    seen: set[str] = set()
+    for key, val in _US_NAME_MAP.items():
+        if key in seen:
+            continue
+        if k in key or key.startswith(k):
+            out.append({"name": val[1], "code": val[0], "symbol": val[0], "market": "美股", "exchange": val[2]})
+            seen.add(val[0])
+        if len(out) >= 3:
+            break
+    return out
+
+
 def norm_symbol(symbol: str) -> str:
     """Normalize user/LLM supplied code to sina format, e.g. sh600519 / sz300750."""
     s = (symbol or "").strip().lower()
@@ -125,7 +225,8 @@ def _clean_ohlcv(df: pd.DataFrame, limit: int = 250) -> tuple[pd.DataFrame, bool
 
 @skill(
     "search_stock",
-    "按名称/拼音/代码搜索A股股票，返回前5个匹配（名称、6位代码、sina格式symbol）。不知道股票代码时先用它。",
+    "按名称/拼音/代码搜索股票，返回前5个匹配（名称、代码、symbol）。A 股用 sina suggest；"
+    "未命中时本地美股名称映射兜底（Amazon→AMZN、Apple→AAPL、特斯拉→TSLA 等约 40 个常见标的）。",
     {
         "type": "object",
         "properties": {"keyword": {"type": "string", "description": "股票名称、简称或代码片段"}},
@@ -133,6 +234,9 @@ def _clean_ohlcv(df: pd.DataFrame, limit: int = 250) -> tuple[pd.DataFrame, bool
     },
     internal=True,)
 def search_stock(keyword: str) -> dict:
+    # 1) A 股搜索：sina suggest3
+    a_items: list[dict] = []
+    a_meta: dict = {"source": "sina.suggest3", "count": 0}
     try:
         resp = requests.get(
             "https://suggest3.sinajs.cn/suggest/type=11,12&key={}&name=suggestdata".format(
@@ -145,21 +249,35 @@ def search_stock(keyword: str) -> dict:
         text = resp.text
         m = re.search(r'"(.*)"', text)
         body = m.group(1) if m else ""
-        items = []
         for entry in body.split(";"):
             entry = entry.strip()
             if not entry:
                 continue
             parts = entry.split(",")
             if len(parts) >= 4 and parts[1] in ("11", "12") and re.match(r"^\d{6}$", parts[2]):
-                items.append({"name": parts[0], "code": parts[2], "symbol": parts[3]})
-            if len(items) >= 5:
-                break
-        if not items:
-            return ok([], meta("sina.suggest3", 0), artifact=None) | {"note": "未找到匹配股票"}
-        return ok(items, meta("sina.suggest3", len(items)))
+                a_items.append({"name": parts[0], "code": parts[2], "symbol": parts[3]})
+                if len(a_items) >= 5:
+                    break
+        a_meta["count"] = len(a_items)
     except Exception as e:  # noqa: BLE001
-        return err(f"股票搜索失败: {type(e).__name__}: {e}")
+        # A 股搜索失败不算致命，继续尝试美股兜底
+        a_meta = {"source": "sina.suggest3", "count": 0, "a_share_error": f"{type(e).__name__}: {e}"}
+    if a_items:
+        return ok(a_items, a_meta)
+
+    # 2) 美股兜底：本地常见名称映射
+    us_items = _lookup_us_name(keyword)
+    if us_items:
+        return ok(
+            us_items,
+            {"source": "us.name_map", "count": len(us_items), "fallback": True},
+        )
+
+    return ok(
+        [],
+        {"source": "sina.suggest3+us.name_map", "count": 0, "fallback_tried": True},
+        artifact=None,
+    ) | {"note": f"未找到匹配股票：{keyword}（A 股 / 美股均未命中）"}
 
 
 @skill(
