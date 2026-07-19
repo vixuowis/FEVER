@@ -1058,6 +1058,162 @@ def get_us_stock_sec_filings(symbol: str, count: int = 20) -> dict:
 
 
 @skill(
+    "get_us_stock_holder",
+    "美股股东结构与内部人（yfinance）："
+    "major_holders（内部人/机构占比饼图）、institutional_holders（前 10 大机构）、"
+    "insider_transactions（近 3 月内部人买入/卖出）、mutualfund_holders（前 10 大基金）。"
+    "symbol 为字母代码如 NVDA。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_holder(symbol: str) -> dict:
+    """美股股东结构与内部人（yfinance）。"""
+    sym = norm_us_symbol(symbol)
+    try:
+        t = yf.Ticker(sym)
+    except Exception as e:  # noqa: BLE001
+        return err(f"美股 {sym} 股东数据获取失败: {type(e).__name__}: {e}")
+    out: dict[str, Any] = {"symbol": sym}
+
+    def _df_to_records(df, date_cols=("Date",)) -> list[dict]:
+        if df is None or len(df) == 0:
+            return []
+        records = []
+        for _, r in df.iterrows():
+            d = {}
+            for c in df.columns:
+                v = r[c]
+                if pd.isna(v):
+                    continue
+                d[str(c)] = str(v) if isinstance(v, (pd.Timestamp,)) else v
+            if "Date" in d and hasattr(d["Date"], "isoformat"):
+                d["Date"] = d["Date"].isoformat()[:10]
+            records.append(d)
+        return records
+
+    # 1) major_holders: {0-2 列名可能为 "Breakdown" / "Value"}
+    try:
+        mh = t.major_holders
+        if mh is not None and len(mh) > 0:
+            out["major_holders"] = _df_to_records(mh.reset_index())
+    except Exception as e:  # noqa: BLE001
+        out["major_holders_error"] = f"{type(e).__name__}: {e}"
+
+    # 2) institutional_holders: 含 Date / Holder / Shares / Value / pctChange
+    try:
+        ih = t.institutional_holders
+        if ih is not None and len(ih) > 0:
+            out["institutional_holders"] = _df_to_records(ih.head(10))
+    except Exception as e:  # noqa: BLE001
+        out["institutional_holders_error"] = f"{type(e).__name__}: {e}"
+
+    # 3) mutualfund_holders
+    try:
+        mfh = t.mutualfund_holders
+        if mfh is not None and len(mfh) > 0:
+            out["mutualfund_holders"] = _df_to_records(mfh.head(10))
+    except Exception as e:  # noqa: BLE001
+        out["mutualfund_holders_error"] = f"{type(e).__name__}: {e}"
+
+    # 4) insider_transactions: insider / position / transaction / shares / value / date
+    try:
+        it = t.insider_transactions
+        if it is not None and len(it) > 0:
+            out["insider_transactions"] = _df_to_records(it.head(20))
+    except Exception as e:  # noqa: BLE001
+        out["insider_transactions_error"] = f"{type(e).__name__}: {e}"
+
+    if not any(k in out for k in ("major_holders", "institutional_holders", "mutualfund_holders", "insider_transactions")):
+        return err(f"美股 {sym} 股东数据为空")
+    return ok(out, meta("yfinance.Ticker.major_holders+institutional+insider", 4))
+
+
+@skill(
+    "get_us_stock_analyst",
+    "美股卖方研报评级与目标价（yfinance）："
+    "recommendations_summary（近 12 个月评级分布 buy/hold/sell + 0/1 标度）、"
+    "analyst_price_targets（最高/最低/平均/中位目标价）、"
+    "earnings_estimate（下一季度/年度 EPS/Revenue 共识与范围）、"
+    "earnings_history（近 4 季度 EPS estimate/actual/surprise_pct）。"
+    "symbol 为字母代码。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_analyst(symbol: str) -> dict:
+    """美股卖方研报评级与目标价（yfinance）。"""
+    sym = norm_us_symbol(symbol)
+    try:
+        t = yf.Ticker(sym)
+    except Exception as e:  # noqa: BLE001
+        return err(f"美股 {sym} 卖方数据获取失败: {type(e).__name__}: {e}")
+    out: dict[str, Any] = {"symbol": sym}
+
+    def _df_to_records(df, n: int | None = None) -> list[dict]:
+        if df is None or len(df) == 0:
+            return []
+        sub = df if n is None else df.head(n)
+        records = []
+        for _, r in sub.iterrows():
+            d = {}
+            for c in sub.columns:
+                v = r[c]
+                if pd.isna(v):
+                    continue
+                d[str(c)] = str(v) if isinstance(v, (pd.Timestamp,)) else v
+            records.append(d)
+        return records
+
+    # 1) recommendations_summary: 列含 period / strongBuy / buy / hold / sell / strongSell
+    try:
+        rs = t.recommendations_summary
+        if rs is not None and len(rs) > 0:
+            out["recommendations_summary"] = _df_to_records(rs.head(8))
+    except Exception as e:  # noqa: BLE001
+        out["recommendations_summary_error"] = f"{type(e).__name__}: {e}"
+
+    # 2) analyst_price_targets: 字典（current/low/high/mean/median）
+    try:
+        apt = t.analyst_price_targets
+        if isinstance(apt, dict) and apt:
+            out["price_targets"] = {k: (None if (v is None or (isinstance(v, float) and pd.isna(v))) else v)
+                                    for k, v in apt.items()}
+        elif apt is not None and len(apt) > 0:
+            out["price_targets"] = _df_to_records(apt)
+    except Exception as e:  # noqa: BLE001
+        out["price_targets_error"] = f"{type(e).__name__}: {e}"
+
+    # 3) earnings_estimate: 下一期 EPS/Revenue 共识
+    try:
+        ee = t.earnings_estimate
+        if ee is not None and len(ee) > 0:
+            out["earnings_estimate"] = _df_to_records(ee)
+    except Exception as e:  # noqa: BLE001
+        out["earnings_estimate_error"] = f"{type(e).__name__}: {e}"
+
+    # 4) earnings_history: 近 4 季度 EPS 实际 vs 预期
+    try:
+        eh = t.earnings_history
+        if eh is not None and len(eh) > 0:
+            out["earnings_history"] = _df_to_records(eh.head(8))
+    except Exception as e:  # noqa: BLE001
+        out["earnings_history_error"] = f"{type(e).__name__}: {e}"
+
+    if not any(k in out for k in ("recommendations_summary", "price_targets", "earnings_estimate", "earnings_history")):
+        return err(f"美股 {sym} 卖方数据为空")
+    return ok(out, meta("yfinance.Ticker.recommendations+price_targets+earnings_estimate", 4))
+
+
+@skill(
     "get_current_date",
     "返回服务器当前日期与时间（用于对齐「最近/今天」等相对时间表述）。",
     {"type": "object", "properties": {}, "required": []},

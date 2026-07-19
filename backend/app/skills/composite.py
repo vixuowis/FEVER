@@ -191,7 +191,8 @@ async def market_research(symbol: str, lookback_days: int = 60,
     us = bool(raw) and is_us_symbol(raw)
     focus = focus or ["price", "sector", "flow"]
     if us:
-        # 美股路径：akshare 无 US 行业/资金流/龙虎榜接口，强制只跑 price
+        # 美股：akshare 无 US 行业/资金流/龙虎榜，强制只跑 price + 美股专属子集
+        # （实时行情 + 公司简介，让 market_research 在美股场景下不至于只返回 K 线）
         sym = raw.upper()
         focus_eff = ["price"]
     else:
@@ -206,6 +207,10 @@ async def market_research(symbol: str, lookback_days: int = 60,
     tasks: list[tuple[str, dict]] = []
     if "price" in focus_eff:
         tasks.append(("get_stock_daily", {"symbol": sym, "start_date": start, "end_date": end, "adjust": "qfq"}))
+        if us:
+            # 美股追加：实时行情（spot）+ 公司简介（info），填补 ak share 无 US 行业/资金流的口子
+            tasks.append(("get_us_stock_spot", {"symbol": sym}))
+            tasks.append(("get_us_stock_info", {"symbol": sym}))
     if not us:
         if "sector" in focus_eff:
             tasks.append(("list_industry_boards", {"symbol": sym}))
@@ -366,23 +371,42 @@ async def post_market_outlook(symbol: str, lookback_days: int = 30) -> dict:
     },
     category="composite",
     composes=["get_financial_abstract", "get_financial_indicator",
-              "get_income_statement", "get_profit_forecast"],
+              "get_income_statement", "get_profit_forecast",
+              "get_us_stock_info", "get_us_stock_finance",
+              "get_us_stock_indicator", "get_us_stock_calendar",
+              "get_us_stock_analyst"],
 )
 async def financial_research(symbol: str, period: str = "annual") -> dict:
-    code = "".join(ch for ch in str(symbol) if ch.isdigit())[-6:]
-    if len(code) != 6:
-        return err(f"symbol 不合法: {symbol}")
-    tasks = [
-        ("get_financial_abstract", {"symbol": code}),
-        ("get_financial_indicator", {"symbol": code}),
-        ("get_income_statement", {"symbol": code, "periods": 8 if period == "annual" else 12}),
-        ("get_profit_forecast", {"symbol": code}),
-    ]
+    raw = (str(symbol) or "").strip()
+    if is_us_symbol(raw):
+        # 美股：财务报表（东财） + 财务指标（东财） + 财报日历（yfinance） +
+        #       公司简介（雪球） + 卖方研报评级 / 目标价（yfinance）
+        sym = raw.upper()
+        tasks: list[tuple[str, dict]] = [
+            ("get_us_stock_finance",   {"symbol": sym, "report_type": "资产负债表", "indicator": "年报"}),
+            ("get_us_stock_indicator", {"symbol": sym, "indicator": "年报"}),
+            ("get_us_stock_calendar",  {"symbol": sym}),
+            ("get_us_stock_info",      {"symbol": sym}),
+            ("get_us_stock_analyst",   {"symbol": sym}),
+        ]
+        market_label = "美股"
+    else:
+        code = "".join(ch for ch in raw if ch.isdigit())[-6:]
+        if len(code) != 6:
+            return err(f"symbol 不合法: {symbol}")
+        sym = code
+        tasks = [
+            ("get_financial_abstract", {"symbol": sym}),
+            ("get_financial_indicator", {"symbol": sym}),
+            ("get_income_statement", {"symbol": sym, "periods": 8 if period == "annual" else 12}),
+            ("get_profit_forecast", {"symbol": sym}),
+        ]
+        market_label = "A股"
     results = await _gather_sub(tasks)
     summary = _summarize_subs(results)
     summary["composed"] = [n for n, _ in tasks]
     return ok(
-        {"symbol": code, "period": period,
+        {"symbol": sym, "period": period, "market": market_label,
          "sub_results": [{"skill": n, "ok": r.get("ok"),
                           "preview": _clip(str(r.get("data") or r.get("error")), 200)}
                          for (n, _), r in zip(tasks, results)],
@@ -471,21 +495,31 @@ async def news_intel(symbol: str | None = None,
         "additionalProperties": False,
     },
     category="composite",
-    composes=["get_holder_change", "get_restricted_release_summary"],
+    composes=["get_holder_change", "get_restricted_release_summary",
+              "get_us_stock_holder"],
 )
 async def holder_research(symbol: str) -> dict:
-    code = "".join(ch for ch in str(symbol) if ch.isdigit())[-6:]
-    if len(code) != 6:
-        return err(f"symbol 不合法: {symbol}")
-    tasks = [
-        ("get_holder_change", {"symbol": code}),
-        ("get_restricted_release_summary", {"symbol": code}),
-    ]
+    raw = (str(symbol) or "").strip()
+    if is_us_symbol(raw):
+        # 美股：major_holders / institutional_holders / mutualfund_holders / insider_transactions
+        sym = raw.upper()
+        tasks: list[tuple[str, dict]] = [("get_us_stock_holder", {"symbol": sym})]
+        market_label = "美股"
+    else:
+        code = "".join(ch for ch in raw if ch.isdigit())[-6:]
+        if len(code) != 6:
+            return err(f"symbol 不合法: {symbol}")
+        sym = code
+        tasks = [
+            ("get_holder_change", {"symbol": sym}),
+            ("get_restricted_release_summary", {"symbol": sym}),
+        ]
+        market_label = "A股"
     results = await _gather_sub(tasks)
     summary = _summarize_subs(results)
     summary["composed"] = [n for n, _ in tasks]
     return ok(
-        {"symbol": code,
+        {"symbol": sym, "market": market_label,
          "sub_results": [{"skill": n, "ok": r.get("ok"),
                           "preview": _clip(str(r.get("data") or r.get("error")), 200)}
                          for (n, _), r in zip(tasks, results)],
