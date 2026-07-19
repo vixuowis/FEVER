@@ -411,7 +411,8 @@ async def financial_research(symbol: str, period: str = "annual") -> dict:
         "additionalProperties": False,
     },
     category="composite",
-    composes=["get_stock_news", "get_global_news", "get_announcements"],
+    composes=["get_stock_news", "get_global_news", "get_announcements",
+              "get_us_stock_news", "get_us_stock_sec_filings"],
 )
 async def news_intel(symbol: str | None = None,
                      kind: list[str] | None = None,
@@ -427,18 +428,16 @@ async def news_intel(symbol: str | None = None,
             # A 股：调个股新闻
             tasks.append(("get_stock_news", {"symbol": code, "limit": limit}))
         elif us_stock:
-            # 美股：akshare.stock_news_em 仅支持 6 位 A 股代码，
-            # 改走全球快讯（akshare.stock_info_global_em），再让 LLM 自行过滤
-            tasks.append(("get_global_news", {"limit": limit * 2}))
-            notes.append(f"美股 {raw_symbol} 无个股新闻接口，已用全球快讯兜底")
+            # 美股：走 yfinance.Ticker.news（Yahoo Finance，含标题/摘要/来源/链接）
+            tasks.append(("get_us_stock_news", {"symbol": raw_symbol, "count": limit}))
     if "global" in kind:
         tasks.append(("get_global_news", {"limit": limit * 2}))
     if "announcement" in kind:
         if code:
             tasks.append(("get_announcements", {"keyword": code, "limit": limit}))
         elif us_stock:
-            # 美股没有中文公告接口，跳过并提示
-            notes.append(f"美股 {raw_symbol} 无公告接口，已跳过 announcement")
+            # 美股：走 yfinance.Ticker.sec_filings（SEC 8-K/10-Q/10-K 原文）
+            tasks.append(("get_us_stock_sec_filings", {"symbol": raw_symbol, "count": limit}))
     if not tasks:
         return err("kind 不能为空（至少要一个非空子集）")
 
@@ -624,7 +623,10 @@ async def event_study_skill(event_date: str, symbol: str | None = None,
         "additionalProperties": False,
     },
     category="composite",
-    composes=["search_stock", "get_financial_abstract", "get_stock_daily"],
+    composes=["search_stock", "get_financial_abstract", "get_stock_daily",
+              "get_us_stock_spot", "get_us_stock_info",
+              "get_us_stock_finance", "get_us_stock_indicator",
+              "get_us_stock_calendar"],
 )
 async def stock_overview(keyword: str) -> dict:
     r = await execute_skill("search_stock", {"keyword": keyword})
@@ -660,10 +662,15 @@ async def stock_overview(keyword: str) -> dict:
     from datetime import datetime, timedelta
     end = datetime.now().strftime("%Y%m%d")
     start = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
-    # 美股没有 A 股财务摘要，只取日K
+    # 美股没有 A 股财务摘要；并行拉取实时行情 + 基本信息 + 财务三表(资产负债表) + 财务指标 + 日K
     if market == "US":
         tasks = [
-            ("get_stock_daily", {"symbol": code, "start_date": start, "end_date": end, "adjust": "qfq"}),
+            ("get_us_stock_spot",     {"symbol": code}),
+            ("get_us_stock_info",     {"symbol": code}),
+            ("get_us_stock_finance",  {"symbol": code, "report_type": "资产负债表", "indicator": "年报"}),
+            ("get_us_stock_indicator", {"symbol": code, "indicator": "年报"}),
+            ("get_us_stock_calendar", {"symbol": code}),
+            ("get_stock_daily",       {"symbol": code, "start_date": start, "end_date": end, "adjust": "qfq"}),
         ]
     else:
         tasks = [

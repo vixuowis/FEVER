@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 import akshare as ak
 import pandas as pd
 import requests
+import yfinance as yf
 
 from .registry import err, meta, ok, skill
 
@@ -313,6 +314,10 @@ _US_NAME_MAP: dict[str, tuple[str, str, str]] = {
 }
 
 
+# 所有已知 ticker 集合（从 _US_NAME_MAP 的 value[0] 提取），用于「纯 ticker 字符串」直接识别
+_US_TICKER_SET: frozenset[str] = frozenset(v[0].upper() for v in _US_NAME_MAP.values())
+
+
 def _lookup_us_name(keyword: str) -> list[dict]:
     """本地兜底：把 keyword 解释为美股代码。返回最多 3 个匹配。"""
     if not keyword:
@@ -320,7 +325,15 @@ def _lookup_us_name(keyword: str) -> list[dict]:
     k = keyword.strip().lower()
     if not k:
         return []
-    # 1) 精确匹配
+    # 0) 提取 ticker token 直接命中（处理 "NVDA" / "NVDA 英伟达" / "英伟达 NVDA" 等混合串）
+    #    _US_NAME_MAP 的 key 是英文/中文名，不含 ticker 本身；用 _US_TICKER_SET 反查 value
+    for token in re.findall(r"[A-Za-z]{1,5}", keyword):
+        upper = token.upper()
+        if upper in _US_TICKER_SET:
+            for v in _US_NAME_MAP.values():
+                if v[0].upper() == upper:
+                    return [{"name": v[1], "code": v[0], "symbol": v[0], "market": "美股", "exchange": v[2]}]
+    # 1) 精确匹配（中文名 / 英文小写名）
     hit = _US_NAME_MAP.get(k)
     if hit:
         return [{"name": hit[1], "code": hit[0], "symbol": hit[0], "market": "美股", "exchange": hit[2]}]
@@ -469,14 +482,36 @@ def search_stock(keyword: str) -> dict:
     # 2) 美股兜底：本地常见名称映射（独立于 A 股结果）
     us_items = _lookup_us_name(keyword)
 
-    # 3) 合并去重（A 股按 code，美股按 code），A 股优先（与既有行为一致）
-    merged: list[dict] = list(a_items)
-    seen_codes: set[str] = {x.get("code", "") for x in a_items}
+    # 3) 合并去重：ticker 强信号排第一（避免 "NVDA 英伟达" 被 A 股模糊匹配抢走），
+    #    其余 A 股优先（与既有行为一致）
+    # 3.1 检测 keyword 中是否含已知美股 ticker（_US_TICKER_SET 来自 _US_NAME_MAP 的 value[0]）
+    ticker_hint: str | None = None
+    for token in re.findall(r"[A-Za-z]{1,5}", keyword or ""):
+        t = token.upper()
+        if t in _US_TICKER_SET:
+            ticker_hint = t
+            break
+    merged: list[dict] = []
+    seen_codes: set[str] = set()
+    # 3.2 美股 ticker 精确匹配优先
+    if ticker_hint:
+        for u in us_items:
+            if str(u.get("code", "")).upper() == ticker_hint:
+                merged.append(u)
+                seen_codes.add(str(u.get("code", "")))
+                break
+    # 3.3 A 股
+    for a in a_items:
+        if a.get("code") in seen_codes:
+            continue
+        merged.append(a)
+        seen_codes.add(a.get("code", ""))
+    # 3.4 其他美股
     for u in us_items:
-        if u.get("code") and u["code"] in seen_codes:
+        if str(u.get("code", "")) in seen_codes:
             continue
         merged.append(u)
-        seen_codes.add(u.get("code", ""))
+        seen_codes.add(str(u.get("code", "")))
     # 单源总条数 ≤ 5（与原接口约束一致）
     if len(merged) > 5:
         merged = merged[:5]
@@ -706,6 +741,320 @@ def get_sector_spot() -> dict:
         return ok(records, meta("akshare.stock_sector_spot(新浪行业)", len(records)), artifact=artifact)
     except Exception as e:  # noqa: BLE001
         return err(f"行业板块快照获取失败: {type(e).__name__}: {e}")
+
+
+@skill(
+    "get_us_stock_spot",
+    "美股实时行情（akshare.stock_us_spot_em 东方财富源，延迟 15 min）。"
+    "symbol 为字母代码如 NVDA/AAPL/TSLA。返回最新价/涨跌幅/总市值/市盈率等。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_spot(symbol: str) -> dict:
+    """美股实时行情：先尝试东财源（延迟 15 分钟，含总市值/PE），失败回退新浪源。"""
+    sym = norm_us_symbol(symbol)
+    sources: list[tuple[str, Any]] = [
+        ("akshare.stock_us_spot_em", lambda: ak.stock_us_spot_em()),
+        ("akshare.stock_us_spot", lambda: ak.stock_us_spot()),
+    ]
+    for source, fn in sources:
+        try:
+            df = fn()
+        except Exception as e:  # noqa: BLE001
+            continue
+        if df is None or len(df) == 0:
+            continue
+        # 东财源：代码列是 "105.NVDA" 形式；简称列就是 ticker
+        mask = None
+        for col in ("代码", "代码\uff05", "symbol", "Symbol"):
+            if col in df.columns:
+                cand = df[col].astype(str)
+                mask = (cand == f"105.{sym}") | (cand == f"106.{sym}") | (cand == f"107.{sym}") | (cand.str.upper() == sym)
+                if mask.any():
+                    break
+                mask = None
+        if mask is None:
+            # 退而求其次：在所有列里找 ticker
+            for col in df.columns:
+                if df[col].dtype == object:
+                    if df[col].astype(str).str.upper().str.contains(f"^{sym}$", regex=True, na=False).any():
+                        mask = df[col].astype(str).str.upper() == sym
+                        break
+        if mask is None or not mask.any():
+            continue
+        row = df[mask].iloc[0]
+        record = {col: (None if pd.isna(row[col]) else row[col]) for col in df.columns}
+        return ok({"symbol": sym, **record}, meta(source, 1))
+    return err(f"美股 {sym} 实时行情未获取到（东财/新浪源均失败或未找到代码）")
+
+
+@skill(
+    "get_us_stock_info",
+    "美股个股基本信息（akshare.stock_individual_basic_info_us_xq 雪球源）。"
+    "symbol 为字母代码如 NVDA/AAPL/TSLA。返回公司中英文名、行业、上市日期、简介等。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_info(symbol: str) -> dict:
+    """美股个股基本信息（雪球）。"""
+    sym = norm_us_symbol(symbol)
+    try:
+        df = ak.stock_individual_basic_info_us_xq(symbol=sym)
+    except Exception as e:  # noqa: BLE001
+        return err(f"美股 {sym} 基本信息获取失败: {type(e).__name__}: {e}")
+    if df is None or len(df) == 0:
+        return err(f"美股 {sym} 基本信息为空")
+    # 雪球接口返回两列：item / value，转换成 dict
+    try:
+        item_col = next((c for c in df.columns if str(c).lower() in ("item", "key", "项目", "名称")), df.columns[0])
+        value_col = next((c for c in df.columns if c != item_col), df.columns[-1])
+        record: dict = {}
+        for _, r in df.iterrows():
+            k = str(r[item_col]).strip()
+            v = r[value_col]
+            if pd.isna(v):
+                continue
+            record[k] = str(v).strip() if not isinstance(v, (int, float)) else v
+    except Exception:
+        record = {str(c): df[c].tolist() for c in df.columns}
+    return ok({"symbol": sym, **record}, meta("akshare.stock_individual_basic_info_us_xq", len(df)))
+
+
+@skill(
+    "get_us_stock_finance",
+    "美股三大财务报表（akshare.stock_financial_us_report_em 东方财富源）。"
+    "symbol 为字母代码，report_type 支持 资产负债表/综合损益表/现金流量表，indicator 支持 年报/单季报/累计季报。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+            "report_type": {"type": "string", "enum": ["资产负债表", "综合损益表", "现金流量表"],
+                            "description": "报表类型，默认 资产负债表"},
+            "indicator": {"type": "string", "enum": ["年报", "单季报", "累计季报"],
+                          "description": "时间口径，默认 年报"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_finance(symbol: str, report_type: str = "资产负债表", indicator: str = "年报") -> dict:
+    """美股三大报表（资产负债表/综合损益表/现金流量表）。"""
+    sym = norm_us_symbol(symbol)
+    try:
+        df = ak.stock_financial_us_report_em(stock=sym, symbol=report_type, indicator=indicator)
+    except Exception as e:  # noqa: BLE001
+        return err(f"美股 {sym} {report_type} 获取失败: {type(e).__name__}: {e}")
+    if df is None or len(df) == 0:
+        return err(f"美股 {sym} {report_type} 为空")
+    # 整理为 [{date, type, item, amount}, ...] 列表（按 REPORT_DATE 倒序）
+    keep_cols = [c for c in ("REPORT_DATE", "REPORT_TYPE", "ITEM_NAME", "AMOUNT") if c in df.columns]
+    if not keep_cols:
+        return err(f"美股 {sym} {report_type} 返回结构异常: {list(df.columns)}")
+    sub = df[keep_cols].copy()
+    sub.columns = ["date", "report", "item", "amount"][:len(keep_cols)]
+    sub = sub.head(80)  # 截断防爆
+    records = sub.to_dict(orient="records")
+    return ok(
+        {"symbol": sym, "report_type": report_type, "indicator": indicator, "rows": records},
+        meta("akshare.stock_financial_us_report_em", len(records)),
+    )
+
+
+@skill(
+    "get_us_stock_indicator",
+    "美股财务分析指标（akshare.stock_financial_us_analysis_indicator_em 东方财富源）："
+    "营收、净利润、ROE、ROA、负债率、EPS 等。symbol 为字母代码，indicator 支持 年报/单季报/累计季报。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+            "indicator": {"type": "string", "enum": ["年报", "单季报", "累计季报"],
+                          "description": "时间口径，默认 年报"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_indicator(symbol: str, indicator: str = "年报") -> dict:
+    """美股财务分析指标（营收/净利润/ROE/ROA/负债率/EPS 等）。"""
+    sym = norm_us_symbol(symbol)
+    try:
+        df = ak.stock_financial_us_analysis_indicator_em(symbol=sym, indicator=indicator)
+    except Exception as e:  # noqa: BLE001
+        return err(f"美股 {sym} 财务指标获取失败: {type(e).__name__}: {e}")
+    if df is None or len(df) == 0:
+        return err(f"美股 {sym} 财务指标为空")
+    # 字段映射：营收 OPERATE_INCOME、净利润 PARENT_HOLDER_NETPROFIT、EPS BASIC_EPS、
+    #          ROE 均值 ROE_AVG、ROA、负债率 DEBT_ASSET_RATIO、毛利率/净利率/流动比/速动比
+    records = []
+    for _, r in df.iterrows():
+        item = {
+            "date": str(r.get("REPORT_DATE") or r.get("STD_REPORT_DATE") or ""),
+            "revenue": r.get("OPERATE_INCOME"),
+            "revenue_yoy": r.get("OPERATE_INCOME_YOY"),
+            "gross_profit": r.get("GROSS_PROFIT"),
+            "net_profit": r.get("PARENT_HOLDER_NETPROFIT"),
+            "net_profit_yoy": r.get("PARENT_HOLDER_NETPROFIT_YOY"),
+            "eps": r.get("BASIC_EPS"),
+            "gross_margin": r.get("GROSS_PROFIT_RATIO"),
+            "net_margin": r.get("NET_PROFIT_RATIO"),
+            "roe": r.get("ROE_AVG"),
+            "roa": r.get("ROA"),
+            "debt_ratio": r.get("DEBT_ASSET_RATIO"),
+            "current_ratio": r.get("CURRENT_RATIO"),
+            "quick_ratio": r.get("SPEED_RATIO"),
+            "currency": r.get("CURRENCY_ABBR") or r.get("CURRENCY"),
+        }
+        records.append({k: (None if (v is None or (isinstance(v, float) and pd.isna(v))) else v) for k, v in item.items()})
+    return ok(
+        {"symbol": sym, "indicator": indicator, "rows": records},
+        meta("akshare.stock_financial_us_analysis_indicator_em", len(records)),
+    )
+
+
+@skill(
+    "get_us_stock_news",
+    "美股个股新闻（yfinance.Ticker.news Yahoo Finance 源）：标题/摘要/发布时间/来源/原文链接/缩略图。"
+    "symbol 为字母代码如 NVDA/AAPL/TSLA。count 控制条数（默认 20，上限 50）。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+            "count": {"type": "integer", "description": "返回条数，默认 20，上限 50"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_news(symbol: str, count: int = 20) -> dict:
+    """美股个股新闻（Yahoo Finance via yfinance）。"""
+    sym = norm_us_symbol(symbol)
+    n = max(1, min(int(count or 20), 50))
+    try:
+        raw = yf.Ticker(sym).news or []
+    except Exception as e:  # noqa: BLE001
+        return err(f"美股 {sym} 新闻获取失败: {type(e).__name__}: {e}")
+    if not raw:
+        return err(f"美股 {sym} 暂无新闻")
+    records = []
+    for item in raw[:n]:
+        c = item.get("content", {}) if isinstance(item, dict) else {}
+        if not c and isinstance(item, dict):
+            # 兼容老 schema（content 字段平铺在 item 上）
+            c = item
+        thumb = c.get("thumbnail") or {}
+        thumb_url = ""
+        if isinstance(thumb, dict):
+            for res in thumb.get("resolutions") or []:
+                if isinstance(res, dict) and res.get("tag") == "original" and res.get("url"):
+                    thumb_url = res["url"]
+                    break
+        canonical = c.get("canonicalUrl") or {}
+        click = c.get("clickThroughUrl") or {}
+        provider = c.get("provider") or {}
+        link = (canonical.get("url") if isinstance(canonical, dict) else "") or (
+            click.get("url") if isinstance(click, dict) else ""
+        )
+        records.append({
+            "title": str(c.get("title") or "").strip(),
+            "summary": str(c.get("summary") or c.get("description") or "").strip(),
+            "publisher": provider.get("displayName", "") if isinstance(provider, dict) else "",
+            "pub_date": c.get("pubDate") or c.get("displayTime") or "",
+            "link": link,
+            "thumbnail": thumb_url,
+            "editors_pick": bool((c.get("metadata") or {}).get("editorsPick")) if isinstance(c.get("metadata"), dict) else False,
+        })
+    return ok({"symbol": sym, "rows": records}, meta("yfinance.Ticker.news", len(records)))
+
+
+@skill(
+    "get_us_stock_calendar",
+    "美股财报日历（yfinance.Ticker.calendar）：下一次财报日期、预期/前次 EPS、预期/前次 Revenue、"
+    "分红日期、Ex-Dividend 日期。symbol 为字母代码。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_calendar(symbol: str) -> dict:
+    """美股财报日历（yfinance）。"""
+    sym = norm_us_symbol(symbol)
+    try:
+        cal = yf.Ticker(sym).calendar
+    except Exception as e:  # noqa: BLE001
+        return err(f"美股 {sym} 财报日历获取失败: {type(e).__name__}: {e}")
+    if not cal:
+        return err(f"美股 {sym} 暂无财报日历")
+
+    def _to_list(v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, (list, tuple)):
+            return [str(x)[:10] for x in v]
+        return [str(v)[:10]]
+
+    earnings_dates = _to_list(cal.get("Earnings Date"))
+    record = {
+        "earnings_dates": earnings_dates,
+        "earnings_high": cal.get("Earnings High"),
+        "earnings_low": cal.get("Earnings Low"),
+        "earnings_average": cal.get("Earnings Average"),
+        "revenue_high": cal.get("Revenue High"),
+        "revenue_low": cal.get("Revenue Low"),
+        "revenue_average": cal.get("Revenue Average"),
+        "dividend_date": str(cal.get("Dividend Date") or "")[:10] or None,
+        "ex_dividend_date": str(cal.get("Ex-Dividend Date") or "")[:10] or None,
+    }
+    return ok({"symbol": sym, **record}, meta("yfinance.Ticker.calendar", 1))
+
+
+@skill(
+    "get_us_stock_sec_filings",
+    "美股 SEC 文件（yfinance.Ticker.sec_filings 8-K/10-Q/10-K 等）："
+    "提交日期/类型/标题/SEC 原始链接/附件。count 控制条数（默认 20，上限 100）。",
+    {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "美股代码，如 NVDA"},
+            "count": {"type": "integer", "description": "返回条数，默认 20，上限 100"},
+        },
+        "required": ["symbol"],
+    },
+    internal=True,)
+def get_us_stock_sec_filings(symbol: str, count: int = 20) -> dict:
+    """美股 SEC 文件（yfinance）。"""
+    sym = norm_us_symbol(symbol)
+    n = max(1, min(int(count or 20), 100))
+    try:
+        raw = yf.Ticker(sym).sec_filings or []
+    except Exception as e:  # noqa: BLE001
+        return err(f"美股 {sym} SEC 文件获取失败: {type(e).__name__}: {e}")
+    if not raw:
+        return err(f"美股 {sym} 暂无 SEC 文件")
+    records = []
+    for f in raw[:n]:
+        if not isinstance(f, dict):
+            continue
+        exhibits = f.get("exhibits") or {}
+        exhibit_links = list(exhibits.values())[:2] if isinstance(exhibits, dict) else []
+        records.append({
+            "date": str(f.get("date") or "")[:10],
+            "type": f.get("type", ""),
+            "title": f.get("title", ""),
+            "edgar_url": f.get("edgarUrl", ""),
+            "exhibits": exhibit_links,
+        })
+    return ok({"symbol": sym, "rows": records}, meta("yfinance.Ticker.sec_filings", len(records)))
 
 
 @skill(
