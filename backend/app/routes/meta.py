@@ -24,9 +24,9 @@ def skills():
             "name": s.name,
             "description": s.description,
             "parameters": s.parameters,
-            "category": s.category,        # "atomic" | "composite"
+            "category": s.category,        # "atomic" | "skill"
             "internal": s.internal,        # True: LLM 不可见
-            "composes": list(s.composes),  # composite 声明调用的 sub-skill
+            "composes": list(s.composes),  # skill 声明调用的 sub-tool id
         }
         for s in REGISTRY.values()
     ]

@@ -50,9 +50,9 @@ export const SKILL_CN: Record<string, string> = {
   get_convert_bond_spot: "可转债实时",
   get_us_index_daily: "美股指数K线",
   get_index_list: "全球指数列表",
-  // 证据图（composite skill：1 个对外 + 9 个 _eg_* sub-tool，sub-tool 不暴露给前端）
+  // 证据图（skill：1 个对外 + 9 个 _eg_* sub-tool，sub-tool 不暴露给前端）
   evidence_graph: "证据图操作",
-  // 复合 skill（composite）—— LLM 可见的高层能力
+  // skill —— LLM 可见的高层能力（agent 直接看到 skill，不看 atomic）
   stock_overview: "股票概览",
   market_research: "行情综合研究",
   financial_research: "财务综合研究",

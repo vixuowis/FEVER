@@ -8,9 +8,9 @@
    这样图状态能在 deep_researcher agent 多次 tool call 之间持久化，
    而无需在 `run_agent` 或 skill schema 上动外科手术。
 
-2. 暴露给 LLM 的只有一个 **composite skill** ``evidence_graph``，由它 dispatcher
+2. 暴露给 LLM 的只有一个 **skill** ``evidence_graph``，由它 dispatcher
    到 9 个 ``_eg_*`` sub-tool（internal=True，LLM 不可见）：
-   - _eg_add_evidence   —— 添加 evidence 节点（来源 = composite skill 返回的数据）
+   - _eg_add_evidence   —— 添加 evidence 节点（来源 = skill 返回的数据）
    - _eg_add_claim      —— 添加 claim 节点（可证伪陈述）
    - _eg_link           —— 把 claim 链到 evidence（supports/contradicts/context）
    - _eg_set_claim_status —— 修改 claim 状态
@@ -24,9 +24,9 @@
    {nodes, edges, missing, sufficient, stats, markdown}
    前端用现有 markdown 渲染或 DataTable 即可呈现；未来可换专用 GraphView。
 
-4. deep_researcher agent 自身也是「消费者」——它会先调 composite skill 拿数据，
+4. deep_researcher agent 自身也是「消费者」——它会先调 skill 拿数据，
    再调 evidence_graph(action="add_evidence") 把结果塞进图。所以 deep_researcher
-   的 skills 列表 = 一组数据 composite + 一个 evidence_graph composite。
+   的 skills 列表 = 一组数据 skill + 一个 evidence_graph skill。
 """
 from __future__ import annotations
 

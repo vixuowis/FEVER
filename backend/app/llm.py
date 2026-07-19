@@ -39,7 +39,7 @@ async def execute_skill(name: str, args: dict) -> dict:
     """Run a skill handler with timeout; never raises.
 
     Supports both sync and async handlers:
-    - async handler: 直接 await（composite skill 内部 await sub-skill）
+    - async handler: 直接 await（skill 内部 await sub-tool）
     - sync handler:  to_thread 跑（保持原行为）
     """
     ensure_skills_loaded()
@@ -97,8 +97,8 @@ async def run_agent(
     state (mutated): {"content": str, "tool_trace": [..], "rounds": int}
     """
     ensure_skills_loaded()
-    # 三层模型：自动过滤 internal=True 的 atomic skill（LLM 不可见）
-    # composite skill 走 LLM 可见
+    # 三层模型：自动过滤 internal=True 的 atomic tool（LLM 不可见）
+    # skill 走 LLM 可见
     tools = tools_for_agent(agent_def.get("skills", []) or agent_id)
     client = get_client()
 

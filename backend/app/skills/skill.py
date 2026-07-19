@@ -1,12 +1,12 @@
-"""Composite Skill（设计：三层调度模型）。
+"""Skill（设计：三层调度模型 tool → skill → agent → team）。
 
 设计目的
 ========
 
-将现有 atomic skill（akshare 取数 + 9 个 ``_eg_*`` 图操作）编排为 8 个 **LLM 可见的高层
-复合技能**。Agent 的 skills 列表只放 composite —— LLM 不再直接面对几十个 atomic tool。
+将现有 atomic tool（akshare 取数 + 9 个 ``_eg_*`` 图操作）编排为 9 个 **LLM 可见的高层
+Skill**。Agent 的 skills 列表只放 skill —— LLM 不再直接面对几十个 atomic tool。
 
-Composite 接口规范：
+Skill 接口规范：
 
   入参：高层意图（query / symbol / lookback_days / focus），少而精
   出参：{"ok": True,
@@ -16,8 +16,8 @@ Composite 接口规范：
                    "ok_count": N, "fail_count": M }}
   失败：{"ok": False, "error": "..."}
 
-Composite 内部用 ``asyncio.gather`` 并发调子 skill（execute_skill 由 llm.execute_skill 提供，
-它同时支持 sync 与 async handler —— 本文件 handler 都是 async，便于 await 子 skill）。
+Skill 内部用 ``asyncio.gather`` 并发调子 tool（execute_skill 由 llm.execute_skill 提供，
+它同时支持 sync 与 async handler —— 本文件 handler 都是 async，便于 await 子 tool）。
 """
 from __future__ import annotations
 
@@ -77,11 +77,11 @@ def _summarize_subs(results: list[dict]) -> dict:
 
 
 def _collect_artifacts(results: list[dict]) -> list[dict]:
-    """从 sub-skill 结果中收集所有 artifacts 列表（artifacts 优先，单 artifact 兜底）。
+    """从 sub-tool 结果中收集所有 artifacts 列表（artifacts 优先，单 artifact 兜底）。
 
-    composite skill 内部调子 skill 时，execute_skill 不会自动落库。
-    本函数把子结果里的 artifacts/artifact 拍平，统一挂到 composite 的返回上，
-    由 llm.run_agent 走 artifact_store 流程落库 —— 这样 LLM 调一次 composite
+    skill 内部调子 tool 时，execute_skill 不会自动落库。
+    本函数把子结果里的 artifacts/artifact 拍平，统一挂到 skill 的返回上，
+    由 llm.run_agent 走 artifact_store 流程落库 —— 这样 LLM 调一次 skill
     也能在前端 artifacts 面板看到所有子数据。
     """
     out: list[dict] = []
@@ -133,10 +133,10 @@ _GRAPH_ACTION_TO_SUB: dict[str, str] = {
                        "description": "图操作类型"},
         },
         "required": ["action"],
-        # 透传其他参数：composite 接口故意用宽松 schema，sub-tool 校验
+        # 透传其他参数：skill 接口故意用宽松 schema，sub-tool 校验
         "additionalProperties": True,
     },
-    category="composite",
+    category="skill",
     composes=[
         "_eg_add_evidence", "_eg_add_claim", "_eg_link",
         "_eg_set_claim_status", "_eg_merge_claims",
@@ -181,7 +181,7 @@ async def evidence_graph(action: str, **kwargs) -> dict:
         "required": ["symbol"],
         "additionalProperties": False,
     },
-    category="composite",
+    category="skill",
     composes=["get_stock_daily", "list_industry_boards", "get_industry_fund_flow",
               "get_sector_fund_flow_rank", "get_board_change"],
 )
@@ -247,7 +247,7 @@ async def market_research(symbol: str, lookback_days: int = 60,
 # ============================================================== post_market_outlook
 # 后市推演（事件预测员的核心入口）：
 # 并发拉 K线 + 资金流 + 近期新闻 + 板块异动，输出"预测上下文包"。
-# 真正的预测交给 predictor Agent 用 LLM 推理（避免在 composite 里硬编码规则）。
+# 真正的预测交给 predictor Agent 用 LLM 推理（避免在 skill 里硬编码规则）。
 # 第一个落地的预测维度：短期量价 / 催化驱动 / 风险情景。
 
 @skill(
@@ -264,7 +264,7 @@ async def market_research(symbol: str, lookback_days: int = 60,
         "required": ["symbol"],
         "additionalProperties": False,
     },
-    category="composite",
+    category="skill",
     composes=["get_stock_daily", "get_industry_fund_flow", "get_individual_fund_flow_rank",
               "get_stock_news", "list_industry_boards"],
 )
@@ -274,7 +274,7 @@ async def post_market_outlook(symbol: str, lookback_days: int = 30) -> dict:
         return err("symbol 不能为空")
     us = is_us_symbol(raw)
     if us:
-        # 美股：ticker 直接传（composite 不解析 6 位 code，atomic 自行判断）
+        # 美股：ticker 直接传（skill 不解析 6 位 code，atomic 自行判断）
         sym = raw.upper()
     else:
         sym = "".join(ch for ch in raw if ch.isdigit())[-6:]
@@ -369,7 +369,7 @@ async def post_market_outlook(symbol: str, lookback_days: int = 30) -> dict:
         "required": ["symbol"],
         "additionalProperties": False,
     },
-    category="composite",
+    category="skill",
     composes=["get_financial_abstract", "get_financial_indicator",
               "get_income_statement", "get_profit_forecast",
               "get_us_stock_info", "get_us_stock_finance",
@@ -434,7 +434,7 @@ async def financial_research(symbol: str, period: str = "annual") -> dict:
         "required": [],
         "additionalProperties": False,
     },
-    category="composite",
+    category="skill",
     composes=["get_stock_news", "get_global_news", "get_announcements",
               "get_us_stock_news", "get_us_stock_sec_filings"],
 )
@@ -494,7 +494,7 @@ async def news_intel(symbol: str | None = None,
         "required": ["symbol"],
         "additionalProperties": False,
     },
-    category="composite",
+    category="skill",
     composes=["get_holder_change", "get_restricted_release_summary",
               "get_us_stock_holder"],
 )
@@ -544,7 +544,7 @@ async def holder_research(symbol: str) -> dict:
         "required": [],
         "additionalProperties": False,
     },
-    category="composite",
+    category="skill",
     composes=["get_macro", "get_sector_fund_flow_rank"],
 )
 async def macro_intel(topic: str | None = None) -> dict:
@@ -587,7 +587,7 @@ async def macro_intel(topic: str | None = None) -> dict:
         "required": ["event_date"],
         "additionalProperties": False,
     },
-    category="composite",
+    category="skill",
     composes=["search_stock", "event_study"],
 )
 async def event_study_skill(event_date: str, symbol: str | None = None,
@@ -656,7 +656,7 @@ async def event_study_skill(event_date: str, symbol: str | None = None,
         "required": ["keyword"],
         "additionalProperties": False,
     },
-    category="composite",
+    category="skill",
     composes=["search_stock", "get_financial_abstract", "get_stock_daily",
               "get_us_stock_spot", "get_us_stock_info",
               "get_us_stock_finance", "get_us_stock_indicator",

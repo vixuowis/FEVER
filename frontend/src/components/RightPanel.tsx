@@ -382,17 +382,17 @@ function EmptyHint({ text }: { text: string }) {
 }
 
 /* ---------------- 技能 tab ----------------
- * 展示三层模型：composite skill（对 LLM 可见）为主，atomic 工具（internal）
- * 默认折叠，让"工具-技能-智能体-团队"关系一目了然。
+ * 展示三层模型：skill（对 LLM 可见）为主，atomic 工具（internal）
+ * 默认折叠，让"工具-tool → 技能-skill → 智能体-agent → 团队-team"关系一目了然。
  */
 
 function SkillsTab() {
   const skills = useStore((s) => s.skills);
   const [showAtomic, setShowAtomic] = useState(false);
 
-  // 后端不再返 internal=True 的 composite（如 evidence_graph 内部 dispatcher 本身是
-  // composite 但有 composes 列表，逻辑上仍是 high-level）
-  const composite = skills.filter((s) => s.category === "composite");
+  // 后端不再返 internal=True 的 skill（如 evidence_graph 内部 dispatcher 本身是
+  // skill 但有 composes 列表，逻辑上仍是 high-level）
+  const topLevel = skills.filter((s) => s.category === "skill");
   const atomic = skills.filter((s) => s.category === "atomic");
   // atomic 工具按数据域分组，便于浏览
   const atomicByDomain = atomic.reduce<Record<string, SkillMeta[]>>((acc, s) => {
@@ -411,24 +411,24 @@ function SkillsTab() {
           <Layers size={12} /> 三层调度模型
         </div>
         <div className="mt-1.5 text-mute">
-          <span className="font-mono">atomic(52)</span> →{" "}
-          <span className="font-mono">composite({composite.length})</span> →{" "}
-          <span className="font-mono">agent</span> → <span className="font-mono">team</span>
+          <span className="font-mono">tool(52)</span> →{" "}
+          <span className="font-mono">skill({topLevel.length})</span> →{" "}
+          <span className="font-mono">agent(5)</span> → <span className="font-mono">team</span>
         </div>
         <div className="mt-1 text-faint">
-          工具（atomic）是 akshare 取数；技能（composite）把多个工具拼成可研究的视角；智能体只看到 composite。
+          工具（atomic）是 akshare/yfinance 取数；技能（skill）把多个工具拼成可研究的视角；智能体只看到 skill。
         </div>
       </div>
 
-      {/* 1. composite 技能卡片（默认展示） */}
+      {/* 1. skill 卡片（默认展示） */}
       <SectionHeader
         icon={<Wrench size={13} className="text-jade" />}
         title="对外技能"
-        count={composite.length}
+        count={topLevel.length}
         hint="Agent 实际可调用"
       />
-      {composite.map((s) => (
-        <CompositeSkillCard key={s.name} skill={s} />
+      {topLevel.map((s) => (
+        <SkillCard key={s.name} skill={s} />
       ))}
 
       {/* 2. atomic 工具（折叠） */}
@@ -439,7 +439,7 @@ function SkillsTab() {
         >
           {showAtomic ? <ChevronDown size={14} className="text-faint" /> : <ChevronRight size={14} className="text-faint" />}
           <span className="text-[12.5px] font-semibold text-ink">底层工具</span>
-          <span className="text-[11px] text-faint">({atomic.length} 个 atomic · 仅供 composite 内部调用)</span>
+          <span className="text-[11px] text-faint">({atomic.length} 个 atomic · 仅供 skill 内部调用)</span>
         </button>
         <button
           onClick={() => setShowAtomic((v) => !v)}
@@ -492,7 +492,7 @@ function SectionHeader({
   );
 }
 
-function CompositeSkillCard({ skill }: { skill: SkillMeta }) {
+function SkillCard({ skill }: { skill: SkillMeta }) {
   const [expanded, setExpanded] = useState(false);
   const props = (skill.parameters as { properties?: Record<string, unknown> } | undefined)?.properties;
   const params = props ? Object.keys(props) : [];
@@ -504,13 +504,13 @@ function CompositeSkillCard({ skill }: { skill: SkillMeta }) {
         <Wrench size={13} className="text-jade" />
         <span className="text-[13px] font-semibold text-ink">{skillCn(skill.name)}</span>
         <code className="rounded bg-jade-soft/60 px-1.5 py-0.5 font-mono text-[10.5px] text-jade">
-          composite
+          skill
         </code>
         {hasChildren && (
           <button
             onClick={() => setExpanded((v) => !v)}
             className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10.5px] text-faint hover:bg-jade-soft hover:text-jade"
-            title="查看内部 composite 调用的 atomic 工具"
+            title="查看内部 skill 调用的 atomic 工具"
           >
             {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
             {skill.composes!.length} 子能力
@@ -568,7 +568,7 @@ function TeamTab() {
   const agents = useStore((s) => s.agents);
   const skills = useStore((s) => s.skills);
 
-  // 计算每个 agent 实际可见的 composite 工具（过滤 internal）
+  // 计算每个 agent 实际可见的 skill（过滤 internal）
   // 与后端 tools_for_agent 行为一致：internal=True 的 atomic 不算在 agent 视角里
   const visibleByAgent: Record<string, string[]> = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -628,7 +628,7 @@ function TeamTab() {
                   <span
                     key={sk}
                     className="rounded bg-jade-soft/60 px-1.5 py-0.5 text-[10.5px] text-jade"
-                    title="composite 技能（对 LLM 可见）"
+                    title="skill（对 LLM 可见）"
                   >
                     {skillCn(sk)}
                   </span>

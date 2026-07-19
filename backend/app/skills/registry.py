@@ -1,23 +1,23 @@
 """Skill registry: @skill decorator + REGISTRY (design.md §4).
 
-三层调度模型（新增）
-====================
+三层调度模型 tool → skill → agent → team
+========================================
 
-- **Tool（atomic）**：单一原子操作，直接对接 akshare / DB / 内部 API。
-  默认对 LLM 不可见（`internal=True`），仅供 composite skill 内部调用。
+- **Tool（atomic）**：单一原子操作，直接对接 akshare / yfinance / DB / 内部 API。
+  默认对 LLM 不可见（`internal=True`），仅供 skill 内部调用。
   例如：``get_stock_daily``、``_eg_add_evidence``。
 
-- **Skill（composite）**：可调度多个 tool 的复合能力，对 LLM 暴露为一个高层 tool。
+- **Skill**：可调度多个 tool 的复合能力，对 LLM 暴露为一个高层 tool。
   例如：``market_research``（内部调 get_stock_daily / get_index_daily / get_industry_fund_flow …）、
   ``evidence_graph``（dispatch 到 9 个 ``_eg_*`` sub-tool）。
 
-- **Agent**：调度 composite skill（不再直接调 atomic）。
+- **Agent**：调度 skill（不再直接调 atomic）。
   例如：``deep_researcher`` 调 ``evidence_graph`` + 一组 research skill。
 
 - **Team**：调度不同 agent。
 
-LLM 视角下，agent 的 tools 列表只包含 composite + 白名单的 atomic。
-Atomic 默认 internal=True；composite 默认 internal=False。
+LLM 视角下，agent 的 tools 列表只包含 skill + 白名单的 atomic。
+Atomic 默认 internal=True；skill 默认 internal=False。
 ``tools_for_agent(agent_id)`` 会自动过滤掉 internal 的 atomic。
 
 每个 handler 仍然返回统一 dict：
@@ -37,9 +37,9 @@ class SkillDef:
     parameters: dict[str, Any]
     handler: Callable[..., dict]
     # 新增：分类
-    category: str = "atomic"          # "atomic" | "composite"
-    internal: bool = False            # True: LLM 不可见（仅可被 composite skill 或代码内调用）
-    composes: list[str] = field(default_factory=list)  # composite 时声明调用的 sub-skill
+    category: str = "atomic"          # "atomic" | "skill"（atomic 即 internal tool；skill 聚合多 atomic，对 LLM 可见）
+    internal: bool = False            # True: LLM 不可见（仅可被 skill 或代码内调用）
+    composes: list[str] = field(default_factory=list)  # skill 模式下声明调用的 sub-tool id 列表（仅做文档/校验用）
     emit_artifact: bool = field(default=True)
 
     def openai_tool(self) -> dict:
@@ -64,9 +64,9 @@ def skill(name: str, description: str, parameters: dict[str, Any],
         name: skill id (e.g. "market_research" / "_eg_add_evidence")
         description: 一句话描述（暴露给 LLM）
         parameters: JSON schema
-        category: "atomic" (默认) / "composite"
+        category: "atomic" (默认) / "skill"（前者即 atomic 工具，后者聚合多 atomic 暴露给 LLM）
         internal: True 时 LLM 不可见（atomic 默认 False 保持后向兼容；新建 atomic 建议 True）
-        composes: composite 模式下声明它调用的 sub-skill id 列表（仅做文档/校验用）
+        composes: skill 模式下声明它调用的 sub-tool id 列表（仅做文档/校验用）
     """
 
     def deco(fn: Callable[..., dict]):
@@ -179,7 +179,7 @@ def tools_for_agent(agent_id_or_skill_names, *, include_internal: bool = False) 
         agent_id_or_skill_names: agent_id 字符串（查 roster），或 skill 名列表
         include_internal: True 时不过滤 internal（仅给需要直接调 atomic 的 agent 用）
 
-    三层模型下，agent 默认只看 composite + 白名单 atomic。
+    三层模型下，agent 默认只看 skill + 白名单 atomic。
     """
     from ..agents.roster import get_agent  # 延迟导入避免循环
 
@@ -219,6 +219,6 @@ def ensure_skills_loaded() -> None:
     from . import (
         analysis, fundamentals, market, news,
         fundamentals_detail, boards, flows, holders, global_markets,
-        evidence_graph,  # 9 个 _eg_* sub-tool（被 composite evidence_graph 内部 dispatch）
-        composite,        # 8 个高层 composite skill
+        evidence_graph,  # 9 个 _eg_* sub-tool（被 skill evidence_graph 内部 dispatch）
+        skill,            # 8 个高层 skill（composite 改名为 skill，对 LLM 可见）
     )  # noqa: F401

@@ -31,7 +31,7 @@ export interface SkillMeta {
   name: string;
   description: string;
   parameters?: Record<string, unknown>;
-  category?: "atomic" | "composite";
+  category?: "atomic" | "skill";
   internal?: boolean;
   composes?: string[];
 }
