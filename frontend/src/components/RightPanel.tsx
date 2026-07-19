@@ -598,7 +598,6 @@ function TeamTab() {
       </div>
       {agents.map((a) => {
         const visible = visibleByAgent[a.id] || [];
-        const hidden = (a.skills || []).filter((n) => !visible.includes(n));
         return (
           <div
             key={a.id}
@@ -630,15 +629,6 @@ function TeamTab() {
                     key={sk}
                     className="rounded bg-jade-soft/60 px-1.5 py-0.5 text-[10.5px] text-jade"
                     title="composite 技能（对 LLM 可见）"
-                  >
-                    {skillCn(sk)}
-                  </span>
-                ))}
-                {hidden.map((sk) => (
-                  <span
-                    key={sk}
-                    className="rounded bg-[#F4F2EE] px-1.5 py-0.5 text-[10.5px] text-faint line-through"
-                    title="internal 工具，仅供 composite 内部使用"
                   >
                     {skillCn(sk)}
                   </span>

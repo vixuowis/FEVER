@@ -1,8 +1,19 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, HelpCircle, XCircle, Eye, ListTree, Network } from "lucide-react";
 import Markdown from "./Markdown";
 import GraphFlow from "./GraphFlow";
 import { cls } from "../utils";
+
+/** 列表排序：kind 优先级（缺口 > 推论 > 证据） */
+const KIND_ORDER: Record<string, number> = { missing: 0, claim: 1, evidence: 2 };
+/** 列表排序：claim 状态优先级（已验证 > 已否定 > 待补充 > 证据不足 > 探索中） */
+const STATUS_ORDER: Record<string, number> = {
+  verified: 0,
+  rejected: 1,
+  needs_more: 2,
+  insufficient: 3,
+  exploring: 4,
+};
 
 /** 证据图（EvidenceGraph）渲染。payload 结构见 evidence_graph.EvidenceGraph.to_payload() */
 export default function GraphView({ payload }: { payload: any }) {
@@ -16,7 +27,22 @@ export default function GraphView({ payload }: { payload: any }) {
   const stopReason: string = payload?.stop_reason || "";
   const markdown: string = payload?.markdown || "";
   const [showEdges, setShowEdges] = useState(false);
-  const [viewMode, setViewMode] = useState<"graph" | "list">("graph");
+  const [viewMode, setViewMode] = useState<"graph" | "list">("list");
+
+  // 节点按研究逻辑排序：缺口置顶 → 推论按状态优先级 → 证据置底；组内保持原顺序
+  const sortedNodes = useMemo(() => {
+    const indexed = nodes.map((n, i) => ({ n, i }));
+    indexed.sort((a, b) => {
+      const ak = KIND_ORDER[a.n.kind] ?? 9;
+      const bk = KIND_ORDER[b.n.kind] ?? 9;
+      if (ak !== bk) return ak - bk;
+      const as = STATUS_ORDER[a.n.status ?? ""] ?? 9;
+      const bs = STATUS_ORDER[b.n.status ?? ""] ?? 9;
+      if (as !== bs) return as - bs;
+      return a.i - b.i;
+    });
+    return indexed.map((x) => x.n);
+  }, [nodes]);
 
   const claimStatus = stats.claim_status || {};
 
@@ -119,7 +145,7 @@ export default function GraphView({ payload }: { payload: any }) {
             </div>
           ) : (
             <ul className="space-y-1.5 px-3 py-2 text-[12px]">
-              {nodes.map((n) => (
+              {sortedNodes.map((n) => (
                 <li key={n.id} className="flex items-start gap-2">
                   <NodeKindBadge kind={n.kind} status={n.status} />
                   <div className="min-w-0 flex-1">
@@ -228,21 +254,22 @@ function NodeKindBadge({ kind, status }: { kind: string; status?: string }) {
     return <span className="mt-0.5 inline-block rounded bg-brand-soft px-1.5 py-0.5 text-[10px] text-brand">证据</span>;
   }
   if (kind === "claim") {
-    const colors: Record<string, string> = {
-      verified: "bg-jade-soft text-jade",
-      rejected: "bg-rose-soft text-rose",
-      needs_more: "bg-amber-soft text-amber",
-      insufficient: "bg-rose-soft text-rose",
-      exploring: "bg-brand-soft text-brand",
+    const statusMeta: Record<string, { cls: string; label: string }> = {
+      verified:     { cls: "bg-jade-soft text-jade border-jade/40",     label: "已验证" },
+      rejected:     { cls: "bg-rose-soft text-rose border-rose/40",     label: "已否定" },
+      needs_more:   { cls: "bg-amber-soft text-amber border-amber/40",  label: "待补充" },
+      insufficient: { cls: "bg-rose-soft text-rose border-rose/40",     label: "证据不足" },
+      exploring:    { cls: "bg-brand-soft text-brand border-brand/30",  label: "探索中" },
     };
+    const m = statusMeta[status || ""] ?? { cls: "bg-edge text-mute border-edge", label: "推论" };
     return (
       <span
         className={cls(
-          "mt-0.5 inline-block rounded px-1.5 py-0.5 text-[10px]",
-          colors[status || "exploring"] || "bg-edge text-mute",
+          "mt-0.5 inline-block whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px]",
+          m.cls,
         )}
       >
-        推论
+        {m.label}
       </span>
     );
   }

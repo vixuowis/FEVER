@@ -84,6 +84,9 @@ function nextCheckLabel(nextISO: string | null | undefined): string {
 
 /** 单条 hypothesis 卡片：可折叠、内含「深度验证 / 验证为真 / 为伪 / 忽略 / 再次追踪 / 历史」 */
 function LogicCard({ item }: { item: LogicItem }) {
+  // 始终从 store 拿最新条目，避免在消息流快照路径下点击后 UI 不刷新
+  const live = useStore((s) => s.logicLibrary.find((x) => x.id === item.id));
+  const itemLive: LogicItem = live ?? item;
   const updateLogicItem = useStore((s) => s.updateLogicItem);
   const dismissLogicItem = useStore((s) => s.dismissLogicItem);
   const reverifyLogic = useStore((s) => s.reverifyLogic);
@@ -92,8 +95,8 @@ function LogicCard({ item }: { item: LogicItem }) {
   const checking = useStore((s) => s.logicChecking.has(item.id));
   const [expanded, setExpanded] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
-  const meta = STATUS_META[item.status] ?? STATUS_META.pending;
-  const cat = CATEGORY_LABEL[item.category] ?? item.category ?? "推演";
+  const meta = STATUS_META[itemLive.status] ?? STATUS_META.pending;
+  const cat = CATEGORY_LABEL[itemLive.category] ?? itemLive.category ?? "推演";
 
   const onAutoCheck = () => {
     if (checking) return;
@@ -108,19 +111,19 @@ function LogicCard({ item }: { item: LogicItem }) {
       next_check_at: null,
     });
 
-  const lastAuto = item.check_history?.find((e) => e.source === "auto");
-  const showNextSchedule = item.status === "pending_scheduled" && item.next_check_at;
+  const lastAuto = itemLive.check_history?.find((e) => e.source === "auto");
+  const showNextSchedule = itemLive.status === "pending_scheduled" && itemLive.next_check_at;
 
   return (
     <div
       className={cls(
         "rounded-lg border bg-card transition-colors",
-        item.status === "pending" && "border-brand/25",
-        item.status === "pending_scheduled" && "border-faint/30",
-        item.status === "verified" && "border-jade/30",
-        item.status === "rejected" && "border-rise/30",
-        item.status === "inconclusive" && "border-amber/30",
-        item.status === "dismissed" && "border-edge opacity-70",
+        itemLive.status === "pending" && "border-brand/25",
+        itemLive.status === "pending_scheduled" && "border-faint/30",
+        itemLive.status === "verified" && "border-jade/30",
+        itemLive.status === "rejected" && "border-rise/30",
+        itemLive.status === "inconclusive" && "border-amber/30",
+        itemLive.status === "dismissed" && "border-edge opacity-70",
       )}
     >
       {/* 顶部：hypothesis + 状态 chip */}
@@ -146,18 +149,18 @@ function LogicCard({ item }: { item: LogicItem }) {
             <span className="rounded bg-[#F4F2EE] px-1.5 py-px text-[10px] font-medium text-mute">
               {cat}
             </span>
-            {item.probability && (
-              <span className="text-[10px] text-faint">· 概率 {item.probability}</span>
+            {itemLive.probability && (
+              <span className="text-[10px] text-faint">· 概率 {itemLive.probability}</span>
             )}
             {showNextSchedule && (
               <span className="inline-flex items-center gap-1 text-[10px] text-faint">
                 <Clock size={9} />
-                {nextCheckLabel(item.next_check_at)} 再验
+                {nextCheckLabel(itemLive.next_check_at)} 再验
               </span>
             )}
           </span>
           <span className="mt-1 block text-[13px] leading-[1.7] text-ink">
-            {item.hypothesis}
+            {itemLive.hypothesis}
           </span>
         </span>
         <span className="mt-0.5 shrink-0 text-faint">
@@ -168,27 +171,27 @@ function LogicCard({ item }: { item: LogicItem }) {
       {/* 展开区 */}
       {expanded && (
         <div className="space-y-1.5 border-t border-edge/60 px-3 py-2 text-[11.5px] leading-[1.7] text-mute">
-          {item.scope && (
+          {itemLive.scope && (
             <div>
               <span className="text-faint">范围：</span>
-              <span className="text-ink/85">{item.scope}</span>
+              <span className="text-ink/85">{itemLive.scope}</span>
             </div>
           )}
-          {item.horizon && (
+          {itemLive.horizon && (
             <div>
               <span className="text-faint">窗口：</span>
-              <span className="text-ink/85">{item.horizon}</span>
+              <span className="text-ink/85">{itemLive.horizon}</span>
             </div>
           )}
-          {item.check && (
+          {itemLive.check && (
             <div>
               <span className="text-faint">验证：</span>
-              <span className="text-ink/85">{item.check}</span>
+              <span className="text-ink/85">{itemLive.check}</span>
             </div>
           )}
-          {item.question && (
+          {itemLive.question && (
             <div className="border-t border-edge/40 pt-1.5 text-faint">
-              来自问题：<span className="italic">「{item.question}」</span>
+              来自问题：<span className="italic">「{itemLive.question}」</span>
             </div>
           )}
 
@@ -230,19 +233,19 @@ function LogicCard({ item }: { item: LogicItem }) {
           )}
 
           {/* 验证历史（折叠） */}
-          {item.check_history && item.check_history.length > 1 && (
+          {itemLive.check_history && itemLive.check_history.length > 1 && (
             <div className="border-t border-edge/40 pt-1.5">
               <button
                 onClick={() => setShowHistory((v) => !v)}
                 className="inline-flex items-center gap-1 text-[10.5px] text-faint hover:text-ink"
               >
                 <History size={10} />
-                历史记录（{item.check_history.length}）
+                历史记录（{itemLive.check_history.length}）
                 {showHistory ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
               </button>
               {showHistory && (
                 <div className="mt-1 space-y-1">
-                  {item.check_history.slice(1).map((h, i) => (
+                  {itemLive.check_history.slice(1).map((h, i) => (
                     <div
                       key={i}
                       className="flex items-start gap-1.5 rounded border border-edge/40 bg-[#FBFAF8] px-2 py-1"
@@ -284,7 +287,7 @@ function LogicCard({ item }: { item: LogicItem }) {
               {checking ? <Loader2 size={10} className="animate-spin" /> : <Wand2 size={10} />}
               {checking ? "验证中…" : "深度验证"}
             </button>
-            {item.status !== "verified" && item.status !== "rejected" && item.status !== "dismissed" && (
+            {itemLive.status !== "verified" && itemLive.status !== "rejected" && itemLive.status !== "dismissed" && (
               <>
                 <button
                   onClick={onMarkVerified}
@@ -309,9 +312,9 @@ function LogicCard({ item }: { item: LogicItem }) {
                 </button>
               </>
             )}
-            {(item.status === "verified" || item.status === "rejected" ||
-              item.status === "dismissed" || item.status === "inconclusive" ||
-              item.status === "pending_scheduled") && (
+            {(itemLive.status === "verified" || itemLive.status === "rejected" ||
+              itemLive.status === "dismissed" || itemLive.status === "inconclusive" ||
+              itemLive.status === "pending_scheduled") && (
               <button
                 onClick={onResetPending}
                 className="rounded-full border border-edge bg-card px-2 py-0.5 text-[11px] text-mute hover:text-ink"
@@ -320,7 +323,7 @@ function LogicCard({ item }: { item: LogicItem }) {
               </button>
             )}
             <button
-              onClick={() => reverifyLogic(item)}
+              onClick={() => reverifyLogic(itemLive)}
               className="ml-auto inline-flex items-center gap-1 rounded-full border border-jade/40 bg-jade-soft/60 px-2 py-0.5 text-[11px] font-medium text-jade hover:bg-jade hover:text-card"
               title="用这条推演作为种子开启新一轮研究"
             >

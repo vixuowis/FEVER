@@ -21,7 +21,7 @@ interface Props {
 
 /** 团队成员多选对话框：
  *  - 默认全选；用户可选择性去掉非 deep_researcher 专家
- *  - 顶部快速操作：全选 / 全不选 / 只留 deep_researcher
+ *  - 顶部快速操作：全选 / 全不选
  *  - 搜索 + 复选框 + 状态条 */
 export default function TeamMemberPicker({ open, onClose, agents, selectedIds, onChange }: Props) {
   const [query, setQuery] = useState("");
@@ -72,7 +72,6 @@ export default function TeamMemberPicker({ open, onClose, agents, selectedIds, o
 
   const selectAll = () => onChange(agents.map((a) => a.id));
   const clearAll = () => onChange([]); // deep_researcher 仍在硬规则里
-  const onlyDeep = () => onChange([]);
 
   return createPortal(
     <div
@@ -127,12 +126,6 @@ export default function TeamMemberPicker({ open, onClose, agents, selectedIds, o
             className="rounded-md border border-edge bg-card px-2 py-1.5 text-[11.5px] font-medium text-mute transition-colors hover:border-edgeDark hover:text-ink"
           >
             全选
-          </button>
-          <button
-            onClick={onlyDeep}
-            className="rounded-md border border-edge bg-card px-2 py-1.5 text-[11.5px] font-medium text-mute transition-colors hover:border-edgeDark hover:text-ink"
-          >
-            仅深度研究
           </button>
           <button
             onClick={clearAll}
